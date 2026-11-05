@@ -37,7 +37,7 @@ export type HederaAccount = { name: string; id: string; key: string };
 export function hederaAccounts(prefix = ""): HederaAccount[] {
   const accounts: HederaAccount[] = [];
   for (const [envName, value] of Object.entries(process.env)) {
-    const match = /^HEDERA_([A-Z0-9]+)_ID$/.exec(envName);
+    const match = /^HEDERA_([A-Z0-9_]+)_ID$/.exec(envName);
     if (!match || !match[1].startsWith(prefix)) continue;
     const key = process.env[`HEDERA_${match[1]}_KEY`]?.trim();
     const id = value?.trim();

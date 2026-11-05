@@ -190,14 +190,35 @@ def report(agent_id: int) -> None:
         days_left = (int(entity["expiresAt"], 16) - current) / DAY
         rows.append((attrs, days_left))
     print(f"Agent {agent_id}: {int(page.get('count', '0x0'), 16)} record(s) on Arkiv (owner {bureau})")
-    order = {"decision": 0, "loan": 1, "disbursed": 2, "repayment": 3, "repaid": 4, "default": 5}
+    order = {"refusal": 0, "underwriting": 0, "decision": 1, "loan": 2, "disbursed": 3, "repayment": 4, "repaid": 5, "default": 6}
     for attrs, days_left in sorted(rows, key=lambda r: (order.get(r[0]["kind"], 9), r[0].get("drawId", "0x0"))):
+        if "record" in attrs:
+            print_decision(agent_id, attrs, days_left)
+            continue
         amount = attrs.get("amount") or attrs.get("limit") or attrs.get("owed")
         money = f" {format_usdc(int(amount, 16))}" if amount else ""
         owed = f", owed after {format_usdc(int(attrs['owedAfter'], 16))}" if "owedAfter" in attrs else ""
         reason = f" ({attrs['reason']})" if "reason" in attrs else ""
-        print(f"  {attrs['kind']:<9}{money}{owed}{reason}  expires in {days_left:.0f} days  {hashscan_tx(attrs['hederaTx'])}")
+        print(f"  {attrs['kind']:<12}{money}{owed}{reason}  expires in {days_left:.0f} days  {hashscan_tx(attrs['hederaTx'])}")
     print(f"Query: {condition}")
+
+
+def print_decision(agent_id: int, attrs: dict, days_left: float) -> None:
+    """An underwriting decision: its memo, and whether it is the one the credit line on Hedera points to."""
+    raw = bytes.fromhex(attrs["record"].removeprefix("0x"))
+    record = json.loads(raw)
+    intact = Web3.keccak(raw).to_0x_hex() == attrs["decisionHash"]
+    on_chain = ""
+    if record["facts"]["approved"]:
+        from .cli import deployed
+        from .hedera import web3
+
+        credit_line, _ = deployed(web3(), "creditLine")
+        current = "0x" + bytes(credit_line.functions.lines(agent_id).call()[5]).hex()
+        on_chain = "; it is the decision behind the current limit on Hedera" if current == attrs["decisionHash"] else "; superseded"
+    print(f"  {attrs['kind']:<12} limit {format_usdc(record['facts']['limit'])}  expires in {days_left:.0f} days  "
+          f"(record {'matches' if intact else 'DOES NOT match'} its hash{on_chain})")
+    print(f"               {record['memo']}")
 
 
 def main() -> None:

@@ -11,7 +11,7 @@
     python -m overdraft.cli mark-overdue AGENT_ID                    # anyone, after the due date plus grace
     python -m overdraft.cli credit-status AGENT_ID
     python -m overdraft.cli splitter-balance | sweep
-    python -m overdraft.cli send-usdc ACCOUNT AMOUNT_USDC
+    python -m overdraft.cli send-usdc ACCOUNT AMOUNT_USDC [--from NAME]
 """
 
 import argparse
@@ -152,7 +152,7 @@ def deploy_splitter(name: str) -> None:
     print(f"Splitter '{name}': payTo {contract_id}, owner payout {owner}  {hashscan_contract(contract_id)}")
 
 
-def register_agent(owner_name: str, uri: str) -> None:
+def register_agent(owner_name: str, uri: str) -> int:
     """The owner mints the agent's ERC-8004 ID and approves the CreditLine to hold it while the agent owes."""
     w3 = web3()
     _, owner = hedera_account(owner_name)
@@ -165,6 +165,7 @@ def register_agent(owner_name: str, uri: str) -> None:
     agent_id = minted[0]["args"]["tokenId"]
     print(f"ERC-8004 agent ID {agent_id} minted to {owner.address}  {tx_link(receipt)}")
     approve_collateral(owner_name)
+    return agent_id
 
 
 def approve_collateral(owner_name: str) -> None:
@@ -258,15 +259,17 @@ def sweep(name: str) -> None:
               f"owner {format_usdc(a['toOwner'])}; owed now {format_usdc(a['owedAfter'])}  {tx_link(receipt)}")
 
 
-def send_usdc(to: str, amount: str) -> None:
-    """Sends USDC from the operator to a Hedera account or contract (through the token's ERC-20 facade)."""
-    w3, account = web3(), operator()
+def send_usdc(to: str, amount: str, sender: str = "OPERATOR", wait: bool = True) -> None:
+    """Sends USDC from a HEDERA_<NAME> account to a Hedera account or contract (through the token's ERC-20 facade)."""
+    w3 = web3()
+    _, account = hedera_account(sender)
     usdc_id = required("USDC_TOKEN_ID")
     token = w3.eth.contract(address=long_zero_address(usdc_id), abi=ERC20_ABI)
     tx = token.functions.transfer(evm_address_of(to), usdc_atomic(amount)).build_transaction({"from": account.address, "gas": 100_000})
-    print(f"Sent {amount} USDC to {to}  {tx_link(send(w3, account, tx))}")
-    time.sleep(6)  # mirror node lag
-    print(f"{to} now holds {format_usdc(token_balance(to, usdc_id))}")
+    print(f"Sent {amount} USDC from {sender} to {to}  {tx_link(send(w3, account, tx))}")
+    if wait:
+        time.sleep(6)  # mirror node lag
+        print(f"{to} now holds {format_usdc(token_balance(to, usdc_id))}")
 
 
 def main() -> None:
@@ -299,6 +302,7 @@ def main() -> None:
     p = sub.add_parser("send-usdc")
     p.add_argument("to")
     p.add_argument("amount")
+    p.add_argument("--from", dest="sender", default="OPERATOR", help="the HEDERA_<NAME> account that pays")
     a = parser.parse_args()
 
     actions = {
@@ -314,7 +318,7 @@ def main() -> None:
         "credit-status": lambda: credit_status(a.agent_id),
         "splitter-balance": lambda: splitter_balance(a.name),
         "sweep": lambda: sweep(a.name),
-        "send-usdc": lambda: send_usdc(a.to, a.amount),
+        "send-usdc": lambda: send_usdc(a.to, a.amount, a.sender),
     }
     actions[a.command]()
 
