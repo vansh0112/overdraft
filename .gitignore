@@ -11,3 +11,6 @@ dist/
 # Local only
 pitch/
 .DS_Store
+
+# Local service state
+.state/

@@ -66,13 +66,17 @@ cd ../python
 **Arkiv: the credit bureau**
 
 ```bash
+.venv/bin/python -m overdraft.bureau watch             # record decisions, loans and repayments from Hedera on Arkiv
+.venv/bin/python -m overdraft.bureau report 1          # read agent 1's credit history back, with expiry countdowns
 .venv/bin/python -m overdraft.arkiv_test              # write a 90-day mark and read it back filtered by owner
 ```
+
+Records expire on their own: decisions and repayments after 90 days, loans and "repaid" marks after 180.
 
 Example query (Rabdi `arkiv_query`):
 
 ```
-arkiv.schema = str('overdraft.bureau') AND $owner = addr(<bureau address>) AND kind = str('mark')
+arkiv.schema = str('overdraft.bureau') AND $owner = addr(<bureau address>) AND agentId = u64(1)
 ```
 
 **0G: the loan deposit**

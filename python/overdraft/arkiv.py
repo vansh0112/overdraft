@@ -84,28 +84,29 @@ def bureau():
     return Account.from_key(required("ARKIV_BUREAU_KEY"))
 
 
-def create_entity(attrs: list[Attr], lifetime_blocks: int, *, salt: int | None = None) -> dict:
-    """Creates one entity owned by the bureau wallet. Returns {key, expiresAt, txHash}."""
-    if not 0 < lifetime_blocks <= MAX_LIFETIME_BLOCKS:
-        raise ValueError("Lifetime must be between 1 block and 7,884,000 blocks (about 182.5 days)")
-    encoded = sorted((a.encoded() for a in attrs), key=lambda item: item[0])  # strictly ascending by name
-    names = [item[0] for item in encoded]
-    if len(set(names)) != len(names):
-        raise ValueError("Duplicate attribute names")
-    if len(encoded) > 32:
-        raise ValueError("At most 32 attributes per entity")
+def create_entities(items: list[tuple[list[Attr], int]]) -> dict:
+    """Creates several entities owned by the bureau wallet in one transaction (all or none).
 
-    salt = salt if salt is not None else int.from_bytes(os.urandom(16), "big")
-    operation_data = encode(
-        ["(uint128,uint64,uint64,uint8,(bytes32,uint8,bytes)[])"],
-        [(salt, 0, lifetime_blocks, 0, encoded)],
-    )
+    items: (attributes, lifetime in blocks) per entity. Returns {"txHash", "entities": [{key, expiresAt}]}.
+    """
+    if not items:
+        raise ValueError("Nothing to create")
+    ops = []
+    for attrs, lifetime_blocks in items:
+        if not 0 < lifetime_blocks <= MAX_LIFETIME_BLOCKS:
+            raise ValueError("Lifetime must be between 1 block and 7,884,000 blocks (about 182.5 days)")
+        encoded = sorted((a.encoded() for a in attrs), key=lambda item: item[0])  # strictly ascending by name
+        names = [item[0] for item in encoded]
+        if len(set(names)) != len(names):
+            raise ValueError("Duplicate attribute names")
+        if len(encoded) > 32:
+            raise ValueError("At most 32 attributes per entity")
+        salt = int.from_bytes(os.urandom(16), "big")
+        ops.append((OP_CREATE, encode(["(uint128,uint64,uint64,uint8,(bytes32,uint8,bytes)[])"], [(salt, 0, lifetime_blocks, 0, encoded)])))
 
     w3, account = web3(), bureau()
     contract = w3.eth.contract(address=ARKIV_ADDRESS, abi=EXECUTE_ABI)
-    tx = contract.functions.execute([(OP_CREATE, operation_data)]).build_transaction(
-        {"from": account.address, "value": 0}
-    )
+    tx = contract.functions.execute(ops).build_transaction({"from": account.address, "value": 0})
     tx = {k: v for k, v in tx.items() if k not in ("maxFeePerGas", "maxPriorityFeePerGas", "type")}
     tx.update(
         {
@@ -118,13 +119,22 @@ def create_entity(attrs: list[Attr], lifetime_blocks: int, *, salt: int | None =
     tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
     if receipt["status"] != 1:
-        raise RuntimeError(f"Arkiv create reverted: {tx_hash.to_0x_hex()}")
+        raise RuntimeError(f"Arkiv batch reverted: {tx_hash.to_0x_hex()}")
 
-    for log in receipt["logs"]:
-        if log["address"].lower() == ARKIV_ADDRESS.lower() and log["topics"][0].to_0x_hex() == ENTITY_CREATED_TOPIC:
-            expires_at = int.from_bytes(log["data"][:32], "big")
-            return {"key": log["topics"][1].to_0x_hex(), "expiresAt": expires_at, "txHash": tx_hash.to_0x_hex()}
-    raise RuntimeError(f"No EntityCreated event in {tx_hash.to_0x_hex()}")
+    entities = [
+        {"key": log["topics"][1].to_0x_hex(), "expiresAt": int.from_bytes(log["data"][:32], "big")}
+        for log in receipt["logs"]
+        if log["address"].lower() == ARKIV_ADDRESS.lower() and log["topics"][0].to_0x_hex() == ENTITY_CREATED_TOPIC
+    ]
+    if len(entities) != len(items):
+        raise RuntimeError(f"Expected {len(items)} EntityCreated events in {tx_hash.to_0x_hex()}, got {len(entities)}")
+    return {"txHash": tx_hash.to_0x_hex(), "entities": entities}
+
+
+def create_entity(attrs: list[Attr], lifetime_blocks: int) -> dict:
+    """Creates one entity owned by the bureau wallet. Returns {key, expiresAt, txHash}."""
+    result = create_entities([(attrs, lifetime_blocks)])
+    return {**result["entities"][0], "txHash": result["txHash"]}
 
 
 def query(condition: str, *, select: dict | None = None, limit: int = 100, offset: int = 0) -> dict:

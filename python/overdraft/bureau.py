@@ -1,0 +1,199 @@
+"""Credit bureau: records Overdraft's credit history on Arkiv.
+
+The bureau reads the CreditLine and IncomeSplitter events from Hedera's public mirror node and writes
+one Arkiv entity per fact, owned by the bureau wallet so readers can trust who wrote it. Each record
+expires on its own (Arkiv deletes it at the end of its lifetime), so old history ages out like a credit
+report.
+
+    python -m overdraft.bureau watch [--interval 10] [--once]
+    python -m overdraft.bureau report AGENT_ID
+"""
+
+import argparse
+import json
+import time
+
+import requests
+from hexbytes import HexBytes
+from web3 import Web3
+
+from . import arkiv
+from .arkiv import Attr
+from .config import ROOT, read_deployments
+from .hedera import MIRROR, format_usdc, hashscan_tx
+from .solidity import load_abi
+
+SCHEMA = "overdraft.bureau"
+DAY = arkiv.BLOCKS_PER_DAY
+LIFETIME_BLOCKS = {"decision": 90 * DAY, "loan": 180 * DAY, "disbursed": 180 * DAY, "repayment": 90 * DAY, "repaid": 180 * DAY}
+STATE_PATH = ROOT / "python" / ".state" / "bureau.json"
+
+
+def load_state() -> dict:
+    if STATE_PATH.exists():
+        return json.loads(STATE_PATH.read_text())
+    return {"cursors": {}, "splitterAgents": {}}
+
+
+def save_state(state: dict) -> None:
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(json.dumps(state, indent=2) + "\n")
+
+
+def new_logs(contract_id: str, cursor: dict | None) -> list[dict]:
+    """Logs emitted by a contract after the cursor, oldest first, from the mirror node."""
+    params = f"order=asc&limit=100&timestamp=gte:{cursor['timestamp']}" if cursor else "order=asc&limit=100"
+    url = f"{MIRROR}/contracts/{contract_id}/results/logs?{params}"
+    logs = []
+    while url:
+        body = requests.get(url, timeout=30).json()
+        logs.extend(body.get("logs", []))
+        nxt = (body.get("links") or {}).get("next")
+        url = f"{MIRROR.rsplit('/api/v1', 1)[0]}{nxt}" if nxt else None
+    if cursor:
+        logs = [l for l in logs if (l["timestamp"], l["index"]) > (cursor["timestamp"], cursor["index"])]
+    return logs
+
+
+def decode(contract, log: dict):
+    """Returns (event name, args) for a mirror-node log, or None if it isn't one of the contract's events."""
+    entry = {
+        "address": Web3.to_checksum_address(log["address"]),
+        "topics": [HexBytes(t) for t in log["topics"]],
+        "data": HexBytes(log["data"]),
+        "blockNumber": log["block_number"],
+        "transactionHash": HexBytes(log["transaction_hash"]),
+        "transactionIndex": log.get("transaction_index") or 0,
+        "blockHash": HexBytes(log["block_hash"][:66]),
+        "logIndex": log["index"],
+    }
+    for event in contract.events:
+        try:
+            decoded = event().process_log(entry)
+            return decoded["event"], decoded["args"]
+        except Exception:
+            continue
+    return None
+
+
+def records_for(name: str, args, tx_hash: str, splitter_agents: dict) -> list[tuple[str, list[Attr]]]:
+    def base(kind: str, agent_id: int) -> list[Attr]:
+        return [Attr("arkiv.schema", "str", SCHEMA), Attr("kind", "str", kind), Attr("agentId", "u64", agent_id),
+                Attr("hederaTx", "str", tx_hash, indexed=False)]
+
+    if name == "LimitSet":
+        splitter_agents[args["splitter"].lower()] = args["agentId"]
+        return [("decision", base("decision", args["agentId"]) + [
+            Attr("limit", "u64", args["limit"]),
+            Attr("agent", "addr", args["agent"], indexed=False),
+            Attr("zgAccount", "addr", args["zgAccount"], indexed=False),
+            Attr("decisionHash", "str", "0x" + bytes(args["decisionHash"]).hex(), indexed=False),
+        ])]
+    if name == "DrawRequested":
+        return [("loan", base("loan", args["agentId"]) + [
+            Attr("drawId", "u64", args["drawId"]),
+            Attr("amount", "u64", args["amount"]),
+            Attr("owedAfter", "u64", args["owedAfter"]),
+            Attr("zgAccount", "addr", args["zgAccount"], indexed=False),
+        ])]
+    if name == "Disbursed":
+        return [("disbursed", base("disbursed", args["agentId"]) + [
+            Attr("drawId", "u64", args["drawId"]),
+            Attr("zgTx", "str", "0x" + bytes(args["zgTxHash"]).hex(), indexed=False),
+        ])]
+    if name == "Swept":
+        agent_id = splitter_agents.get(args.get("_splitter", ""))
+        if agent_id is None or args["toPool"] == 0:
+            return []
+        out = [("repayment", base("repayment", agent_id) + [
+            Attr("amount", "u64", args["toPool"]),
+            Attr("owedAfter", "u64", args["owedAfter"]),
+        ])]
+        if args["owedAfter"] == 0:
+            out.append(("repaid", base("repaid", agent_id)))
+        return out
+    return []
+
+
+def sync_once(state: dict) -> int:
+    """Writes every new fact since the last sync to Arkiv in one batch. Returns how many were written."""
+    deployments = read_deployments()
+    w3 = Web3()
+    sources = [
+        (deployments["creditLineContractId"], w3.eth.contract(abi=load_abi("CreditLine"))),
+        (deployments["splitterContractId"], w3.eth.contract(abi=load_abi("IncomeSplitter"))),
+    ]
+    pending: list[tuple[str, list[Attr]]] = []
+    cursors = dict(state["cursors"])
+    for contract_id, contract in sources:  # credit line first, so splitters map to agents
+        for log in new_logs(contract_id, state["cursors"].get(contract_id)):
+            decoded = decode(contract, log)
+            if decoded:
+                name, args = decoded
+                args = dict(args)
+                args["_splitter"] = log["address"].lower()
+                pending.extend(records_for(name, args, log["transaction_hash"], state["splitterAgents"]))
+            cursors[contract_id] = {"timestamp": log["timestamp"], "index": log["index"]}
+
+    if pending:
+        result = arkiv.create_entities([(attrs, LIFETIME_BLOCKS[kind]) for kind, attrs in pending])
+        kinds = ", ".join(kind for kind, _ in pending)
+        print(f"{time.strftime('%H:%M:%S')} wrote {len(pending)} record(s) to Arkiv ({kinds}): "
+              f"https://rabdi.explorer.arkiv.network/tx/{result['txHash']}", flush=True)
+    state["cursors"] = cursors
+    save_state(state)
+    return len(pending)
+
+
+def watch(interval: float, once: bool) -> None:
+    state = load_state()
+    print(f"Bureau {arkiv.bureau().address} writing schema '{SCHEMA}' to Arkiv", flush=True)
+    while True:
+        try:
+            sync_once(state)
+        except Exception as error:  # retried on the next round; cursors only advance after a successful write
+            print(f"{time.strftime('%H:%M:%S')} bureau round failed: {str(error)[:160]}", flush=True)
+            state = load_state()
+        if once:
+            return
+        time.sleep(interval)
+
+
+def report(agent_id: int) -> None:
+    """Reads an agent's credit history back from Arkiv, filtered by the bureau wallet."""
+    bureau = arkiv.bureau().address
+    current = arkiv.block_timing()["current_block"]
+    condition = f"arkiv.schema = str('{SCHEMA}') AND $owner = addr({bureau}) AND agentId = u64({agent_id})"
+    page = arkiv.query(condition, select={"key": True, "expiresAt": True, "attributes": True, "count": True}, limit=100)
+    rows = []
+    for entity in page["data"]:
+        attrs = {a["name"]: a["value"] for a in entity["attributes"]}
+        days_left = (int(entity["expiresAt"], 16) - current) / DAY
+        rows.append((attrs, days_left))
+    print(f"Agent {agent_id}: {int(page.get('count', '0x0'), 16)} record(s) on Arkiv (owner {bureau})")
+    order = {"decision": 0, "loan": 1, "disbursed": 2, "repayment": 3, "repaid": 4}
+    for attrs, days_left in sorted(rows, key=lambda r: (order.get(r[0]["kind"], 9), r[0].get("drawId", "0x0"))):
+        amount = attrs.get("amount") or attrs.get("limit")
+        money = f" {format_usdc(int(amount, 16))}" if amount else ""
+        owed = f", owed after {format_usdc(int(attrs['owedAfter'], 16))}" if "owedAfter" in attrs else ""
+        print(f"  {attrs['kind']:<9}{money}{owed}  expires in {days_left:.0f} days  {hashscan_tx(attrs['hederaTx'])}")
+    print(f"Query: {condition}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Overdraft credit bureau on Arkiv.")
+    sub = parser.add_subparsers(dest="command", required=True)
+    w = sub.add_parser("watch")
+    w.add_argument("--interval", type=float, default=10.0)
+    w.add_argument("--once", action="store_true", help="sync once and exit")
+    r = sub.add_parser("report")
+    r.add_argument("agent_id", type=int)
+    args = parser.parse_args()
+    if args.command == "watch":
+        watch(args.interval, args.once)
+    else:
+        report(args.agent_id)
+
+
+if __name__ == "__main__":
+    main()
