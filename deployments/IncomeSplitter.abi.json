@@ -13,11 +13,6 @@
       },
       {
         "internalType": "address",
-        "name": "admin_",
-        "type": "address"
-      },
-      {
-        "internalType": "address",
         "name": "pool_",
         "type": "address"
       },
@@ -25,10 +20,25 @@
         "internalType": "address",
         "name": "computeBucket_",
         "type": "address"
+      },
+      {
+        "internalType": "uint16",
+        "name": "lenderBps_",
+        "type": "uint16"
+      },
+      {
+        "internalType": "uint16",
+        "name": "computeBps_",
+        "type": "uint16"
       }
     ],
     "stateMutability": "nonpayable",
     "type": "constructor"
+  },
+  {
+    "inputs": [],
+    "name": "AlreadyBound",
+    "type": "error"
   },
   {
     "inputs": [
@@ -53,7 +63,7 @@
   },
   {
     "inputs": [],
-    "name": "NotAuthorised",
+    "name": "NotCreditLine",
     "type": "error"
   },
   {
@@ -65,6 +75,19 @@
     "inputs": [],
     "name": "TransferFailed",
     "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "creditLine",
+        "type": "address"
+      }
+    ],
+    "name": "CreditLineBound",
+    "type": "event"
   },
   {
     "anonymous": false,
@@ -144,6 +167,32 @@
   },
   {
     "inputs": [],
+    "name": "MAX_COMPUTE_BPS",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "",
+        "type": "uint16"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_LENDER_BPS",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "",
+        "type": "uint16"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "admin",
     "outputs": [
       {
@@ -158,6 +207,19 @@
   {
     "inputs": [],
     "name": "associateUsdc",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "creditLine_",
+        "type": "address"
+      }
+    ],
+    "name": "bindCreditLine",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -256,43 +318,12 @@
   {
     "inputs": [
       {
-        "internalType": "address",
-        "name": "creditLine_",
-        "type": "address"
-      }
-    ],
-    "name": "setCreditLine",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "internalType": "uint256",
         "name": "owed_",
         "type": "uint256"
       }
     ],
     "name": "setOwed",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint16",
-        "name": "lenderBps_",
-        "type": "uint16"
-      },
-      {
-        "internalType": "uint16",
-        "name": "computeBps_",
-        "type": "uint16"
-      }
-    ],
-    "name": "setShares",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

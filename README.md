@@ -19,7 +19,7 @@ When paid jobs outrun an agent's AI budget, the agent borrows by itself:
 
 | Path | Contents |
 |---|---|
-| `contracts/` | Solidity contracts (Hedera testnet, deployed through the JSON-RPC relay) |
+| `contracts/` | `IncomeSplitter` (splits income, records debt) and `CreditLine` (limits, loan requests). Hedera testnet. |
 | `python/overdraft/` | Agent, CLI, Hedera / Arkiv / 0G clients |
 | `gateway/` | x402 payment gateway in TypeScript. `@x402/hedera` ships only for TypeScript. |
 | `deployments/` | Deployed addresses and ABIs |
@@ -47,16 +47,19 @@ cd gateway && npm install && cd ..
 **Hedera: the income splitter and x402**
 
 ```bash
-cd gateway && npm run create-accounts -- CUSTOMER     # extra testnet accounts, created from the operator
-npm run associate-usdc                                 # let the accounts hold USDC
+cd gateway && npm run create-accounts -- CUSTOMER AGENT   # extra testnet accounts, created from the operator
+npm run associate-usdc                                     # let the accounts hold USDC
 cd ../python
-.venv/bin/python -m overdraft.cli deploy-splitter     # deploy IncomeSplitter and associate USDC
-.venv/bin/uvicorn overdraft.agent.app:app --port 5001 # the agent (internal)
-cd ../gateway && npm run gateway                       # the x402 endpoint, forwards paid requests to the agent
-npm run pay-once                                       # a customer agent pays once
+.venv/bin/python -m overdraft.cli deploy-splitter         # deploy IncomeSplitter and associate USDC
+.venv/bin/python -m overdraft.cli deploy-credit-line      # deploy CreditLine and bind it to the splitter
+.venv/bin/python -m overdraft.cli set-limit 1 <agent account> 5   # underwriter: $5 limit for agent 1
+.venv/bin/python -m overdraft.cli request-draw 1 0.40     # the agent borrows $0.40 (owes $0.42 with the 5% fee)
+.venv/bin/uvicorn overdraft.agent.app:app --port 5001     # the agent (internal)
+cd ../gateway && npm run gateway                           # the x402 endpoint, forwards paid requests to the agent
+npm run pay-once                                           # a customer agent pays once
 cd ../python
-.venv/bin/python -m overdraft.cli splitter-balance
-.venv/bin/python -m overdraft.cli sweep                # split income: lender / compute / owner
+.venv/bin/python -m overdraft.cli sweep                    # split income: lender / compute / owner
+.venv/bin/python -m overdraft.cli credit-status 1          # limit, debt outstanding, loans
 ```
 
 **Arkiv: the credit bureau**
