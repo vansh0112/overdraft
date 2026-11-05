@@ -7,6 +7,10 @@
     "breach-test": {
       "contractId": "0.0.11330190",
       "evmAddress": "0x6EC828892A91846a8EbdC85cE359DD6CbA10EE26"
+    },
+    "watch-test": {
+      "contractId": "0.0.11330444",
+      "evmAddress": "0x7371F9bf4275f38fDf48836DB63dfA8be3f3D21B"
     }
   }
 }
