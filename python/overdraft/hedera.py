@@ -5,6 +5,7 @@ import time
 import requests
 from eth_account import Account
 from web3 import Web3
+from web3.providers.rpc.utils import ExceptionRetryConfiguration
 
 from .config import optional, required
 
@@ -13,13 +14,15 @@ MIRROR = "https://testnet.mirrornode.hedera.com/api/v1"
 
 HEDERA_TESTNET_CHAIN_ID = 296
 FALLBACK_RPC_URLS = ["https://296.rpc.thirdweb.com"]
+NETWORK_ERRORS = (requests.HTTPError, requests.ConnectionError, requests.Timeout)
+RETRY = ExceptionRetryConfiguration(errors=NETWORK_ERRORS, retries=6, backoff_factor=0.5)
 
 
 def web3() -> Web3:
     """Connects to the first Hedera testnet JSON-RPC endpoint that answers (public relays have outages)."""
     urls = [required("HEDERA_RPC_URL"), *(optional("HEDERA_RPC_FALLBACK_URLS") or "").split(","), *FALLBACK_RPC_URLS]
     for url in dict.fromkeys(u.strip() for u in urls if u.strip()):
-        w3 = Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": 60}))
+        w3 = Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": 60}, exception_retry_configuration=RETRY))
         try:
             if w3.eth.chain_id == HEDERA_TESTNET_CHAIN_ID:
                 return w3
@@ -73,8 +76,27 @@ def send(w3: Web3, account, tx: dict) -> dict:
         }
     )
     signed = account.sign_transaction(tx)
-    tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
+    tx_hash = signed.hash
+    for attempt in range(6):
+        # Re-sending the same signed transaction is safe: it has one hash and can only be included once.
+        try:
+            w3.eth.send_raw_transaction(signed.raw_transaction)
+            break
+        except NETWORK_ERRORS:
+            time.sleep(2 + attempt * 2)
+        except ValueError as error:
+            if "known" in str(error).lower() or "nonce too low" in str(error).lower():
+                break
+            raise
+    receipt = None
+    for attempt in range(6):
+        try:
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
+            break
+        except NETWORK_ERRORS:
+            time.sleep(3)
+    if receipt is None:
+        raise RuntimeError(f"No receipt for {hashscan_tx(tx_hash.to_0x_hex())}")
     if receipt["status"] != 1:
         raise RuntimeError(f"Transaction reverted: {hashscan_tx(tx_hash.to_0x_hex())}")
     return receipt
