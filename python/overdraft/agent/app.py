@@ -11,11 +11,12 @@ The compute balance and the AI call are placeholders until the 0G relay and infe
 """
 
 import asyncio
+import hmac
 import os
 import time
 from collections import deque
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from .borrower import Borrower
@@ -25,6 +26,10 @@ AGENT_ID = int(os.getenv("AGENT_CREDIT_ID", "1"))
 COST_PER_JOB_USD = float(os.getenv("AGENT_AI_COST_USD", "0.01"))
 START_BALANCE_USD = float(os.getenv("AGENT_START_BALANCE_USD", "0.02"))
 WAIT_LIMIT_SECONDS = float(os.getenv("AGENT_JOB_WAIT_SECONDS", "90"))
+BORROW_DEBOUNCE_SECONDS = float(os.getenv("AGENT_BORROW_DEBOUNCE_SECONDS", "3"))
+INTERNAL_TOKEN = os.getenv("AGENT_INTERNAL_TOKEN", "")
+if len(INTERNAL_TOKEN) < 20:
+    raise SystemExit("Set AGENT_INTERNAL_TOKEN in .env (a long random value shared with the gateway).")
 
 app = FastAPI(title="Overdraft borrower agent")
 compute = PlaceholderCompute(START_BALANCE_USD)
@@ -36,6 +41,12 @@ state = {"waiting": 0, "served": 0, "refused": 0}
 class TranslateRequest(BaseModel):
     text: str = ""
     to: str = "hi"
+
+
+def require_gateway(x_internal_token: str = Header(default="")) -> None:
+    """Only the x402 gateway, which holds the shared secret, may submit paid jobs."""
+    if not hmac.compare_digest(x_internal_token.encode(), INTERNAL_TOKEN.encode()):
+        raise HTTPException(status_code=401, detail="unauthorised")
 
 
 def log(kind: str, detail: str, url: str | None = None) -> None:
@@ -53,7 +64,7 @@ def tier(balance: float) -> str:
 
 async def ensure_budget() -> None:
     """Borrows the shortfall for every job currently waiting, if the balance can't cover them."""
-    await asyncio.sleep(1.0)  # let a burst of orders arrive, so it is covered by one loan
+    await asyncio.sleep(BORROW_DEBOUNCE_SECONDS)  # let a burst of paid jobs arrive, so one loan covers it
     shortfall = borrower.shortfall_usd(state["waiting"], COST_PER_JOB_USD, compute.balance_usd())
     if shortfall <= 0:
         return
@@ -66,7 +77,7 @@ async def ensure_budget() -> None:
     log("deposit", f"${loan.amount_usd:.2f} added to the compute balance (placeholder until the 0G relay)")
 
 
-@app.post("/translate")
+@app.post("/translate", dependencies=[Depends(require_gateway)])
 async def translate(request: TranslateRequest) -> dict:
     state["waiting"] += 1
     try:

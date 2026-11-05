@@ -15,6 +15,7 @@ const asset = optional("PAYMENT_ASSET") ?? required("USDC_TOKEN_ID");
 const price = required("PRICE_ATOMIC");
 const port = Number(required("GATEWAY_PORT"));
 const agentUrl = required("AGENT_INTERNAL_URL");
+const agentToken = required("AGENT_INTERNAL_TOKEN");
 
 const facilitator = new HTTPFacilitatorClient({ url: required("FACILITATOR_URL") });
 
@@ -38,7 +39,7 @@ app.post("/translate", async (req, res) => {
   try {
     const upstream = await fetch(`${agentUrl}/translate`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-internal-token": agentToken },
       body: JSON.stringify(req.body ?? {}),
     });
     res.status(upstream.status).json(await upstream.json());

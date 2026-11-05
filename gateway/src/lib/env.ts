@@ -30,3 +30,18 @@ export function splitterContractId(): string {
   }
   return id;
 }
+
+export type HederaAccount = { name: string; id: string; key: string };
+
+/** Every HEDERA_<NAME>_ID / HEDERA_<NAME>_KEY pair in .env, optionally only names starting with `prefix`. */
+export function hederaAccounts(prefix = ""): HederaAccount[] {
+  const accounts: HederaAccount[] = [];
+  for (const [envName, value] of Object.entries(process.env)) {
+    const match = /^HEDERA_([A-Z0-9]+)_ID$/.exec(envName);
+    if (!match || !match[1].startsWith(prefix)) continue;
+    const key = process.env[`HEDERA_${match[1]}_KEY`]?.trim();
+    const id = value?.trim();
+    if (id && key && !id.endsWith(".0000000")) accounts.push({ name: match[1], id, key });
+  }
+  return accounts.sort((a, b) => a.name.localeCompare(b.name));
+}

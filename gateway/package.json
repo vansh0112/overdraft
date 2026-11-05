@@ -8,7 +8,8 @@
     "gateway": "tsx src/server.ts",
     "pay-once": "tsx scripts/pay-once.ts",
     "typecheck": "tsc --noEmit",
-    "create-accounts": "tsx scripts/create-accounts.ts"
+    "create-accounts": "tsx scripts/create-accounts.ts",
+    "rush": "tsx scripts/rush.ts"
   },
   "dependencies": {
     "@hiero-ledger/sdk": "2.90.1",

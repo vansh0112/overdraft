@@ -57,8 +57,9 @@ cd ../python
 .venv/bin/uvicorn overdraft.agent.app:app --port 5001     # the agent (internal)
 cd ../gateway && npm run gateway                           # the x402 endpoint, forwards paid requests to the agent
 npm run pay-once                                           # a customer agent pays once
+npm run rush -- 10                                         # a rush: 10 paid jobs from every configured customer
 cd ../python
-.venv/bin/python -m overdraft.cli sweep                    # split income: lender / compute / owner
+.venv/bin/python -m overdraft.sweeper --interval 5         # split income continuously: lender / compute / owner
 .venv/bin/python -m overdraft.cli credit-status 1          # limit, debt outstanding, loans
 ```
 
