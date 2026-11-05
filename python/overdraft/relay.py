@@ -19,7 +19,7 @@ import time
 from web3 import Web3
 
 from . import zg
-from .bureau import decode, new_logs
+from .bureau import decode, new_logs, splitter_ids
 from .cli import deployed, tx_link
 from .config import ROOT, optional, read_deployments
 from .hedera import operator, send, web3 as hedera_web3
@@ -74,16 +74,26 @@ def deposit(state: dict, to: str, amount_usd: float, label: str) -> str | None:
     return tx_hash
 
 
-def handle_draw(state: dict, credit_line, args) -> None:
+def draw_key(credit_line_id: str, draw_id: int) -> str:
+    """Loan numbers restart with each CreditLine, so records are kept per contract."""
+    return f"{credit_line_id}:{draw_id}"
+
+
+def handle_draw(state: dict, credit_line, credit_line_id: str, args) -> None:
     draw_id = str(args["drawId"])
-    record = state["draws"].setdefault(draw_id, {})
-    if record.get("marked") or record.get("skipped"):
+    record = state["draws"].setdefault(draw_key(credit_line_id, args["drawId"]), {})
+    if record.get("marked") or record.get("skipped") or record.get("refused"):
         return
     _, _, zg_tx_on_chain = credit_line.functions.draws(args["drawId"]).call()
     if any(zg_tx_on_chain):
         record["marked"] = True  # already disbursed and recorded
         return
     if not record.get("zgTx"):
+        status = credit_line.functions.lines(args["agentId"]).call()[-1]
+        if status != 1:  # the line defaulted before the deposit went out: don't fund it
+            record["refused"] = "line defaulted"
+            print(f"{time.strftime('%H:%M:%S')} loan #{draw_id}: not deposited, agent {args['agentId']}'s line has defaulted", flush=True)
+            return
         tx_hash = deposit(state, args["zgAccount"], args["amount"] / 1_000_000, f"loan #{draw_id}")
         if not tx_hash:
             return
@@ -110,10 +120,9 @@ def handle_sweep(state: dict, splitter_address: str, args, log_id: str) -> None:
 def sync_once(state: dict, skip_existing: bool) -> None:
     deployments = read_deployments()
     credit_line, _ = deployed(hedera_web3(), "creditLine")
-    sources = [
-        (deployments["creditLineContractId"], Web3().eth.contract(abi=load_abi("CreditLine"))),
-        (deployments["splitterContractId"], Web3().eth.contract(abi=load_abi("IncomeSplitter"))),
-    ]
+    splitter_abi = load_abi("IncomeSplitter")
+    sources = [(deployments["creditLineContractId"], Web3().eth.contract(abi=load_abi("CreditLine")))]
+    sources += [(contract_id, Web3().eth.contract(abi=splitter_abi)) for contract_id in splitter_ids(deployments)]
     first_run = not state["cursors"]
     for contract_id, contract in sources:
         for log in new_logs(contract_id, state["cursors"].get(contract_id)):
@@ -125,9 +134,9 @@ def sync_once(state: dict, skip_existing: bool) -> None:
                     state["lines"][args["splitter"].lower()] = {"agentId": args["agentId"], "zgAccount": args["zgAccount"]}
                 elif name == "DrawRequested":
                     if first_run and skip_existing:
-                        state["draws"][str(args["drawId"])] = {"skipped": True}
+                        state["draws"][draw_key(contract_id, args["drawId"])] = {"skipped": True}
                     else:
-                        handle_draw(state, credit_line, args)
+                        handle_draw(state, credit_line, contract_id, args)
                 elif name == "Swept" and not (first_run and skip_existing):
                     handle_sweep(state, log["address"].lower(), args, log_id)
             state["cursors"][contract_id] = {"timestamp": log["timestamp"], "index": log["index"]}

@@ -1,12 +1,16 @@
 """Overdraft command line (Hedera testnet).
 
-    python -m overdraft.cli deploy-credit-line
-    python -m overdraft.cli deploy-splitter                          # deploy, associate USDC, bind the credit line
-    python -m overdraft.cli set-limit AGENT_ID AGENT_ACCOUNT LIMIT_USDC [--zg-account 0x...]
-    python -m overdraft.cli request-draw AGENT_ID AMOUNT_USDC         # signed by the agent's key
+    python -m overdraft.cli deploy-credit-line                       # CreditLine secured by ERC-8004 IDs
+    python -m overdraft.cli deploy-splitter [--name main]            # an agent's IncomeSplitter, bound to the CreditLine
+    python -m overdraft.cli register-agent [--owner OWNER]           # owner mints the agent's ERC-8004 ID and approves the CreditLine
+    python -m overdraft.cli approve-collateral [--owner OWNER]       # one-time permission to hold the owner's IDs while they owe
+    python -m overdraft.cli set-limit AGENT_ID AGENT_ACCOUNT LIMIT_USDC [--splitter main] [--zg-account 0x...]
+    python -m overdraft.cli request-draw AGENT_ID AMOUNT_USDC [--agent AGENT]
+    python -m overdraft.cli release-id AGENT_ID                      # return the ID once the debt is repaid
+    python -m overdraft.cli flag-breach AGENT_ID REASON              # watcher: defaults a line with debt outstanding
+    python -m overdraft.cli mark-overdue AGENT_ID                    # anyone, after the due date plus grace
     python -m overdraft.cli credit-status AGENT_ID
-    python -m overdraft.cli splitter-balance
-    python -m overdraft.cli sweep
+    python -m overdraft.cli splitter-balance | sweep
     python -m overdraft.cli send-usdc ACCOUNT AMOUNT_USDC
 """
 
@@ -35,15 +39,30 @@ from .solidity import compile_contract, load_abi
 LENDER_BPS = 3_000
 COMPUTE_BPS = 2_000
 FEE_BPS = 500
+IDENTITY_REGISTRY = optional("ERC8004_IDENTITY_REGISTRY") or "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+STATUS = {0: "none", 1: "active", 2: "defaulted"}
+ZERO_ADDRESS = "0x" + "0" * 40
 
-ERC20_TRANSFER_ABI = [
-    {
-        "name": "transfer",
-        "type": "function",
-        "stateMutability": "nonpayable",
-        "inputs": [{"name": "to", "type": "address"}, {"name": "amount", "type": "uint256"}],
-        "outputs": [{"name": "", "type": "bool"}],
-    }
+ERC20_ABI = [
+    {"name": "transfer", "type": "function", "stateMutability": "nonpayable",
+     "inputs": [{"name": "to", "type": "address"}, {"name": "amount", "type": "uint256"}], "outputs": [{"name": "", "type": "bool"}]},
+]
+IDENTITY_ABI = [
+    {"name": "register", "type": "function", "stateMutability": "nonpayable",
+     "inputs": [{"name": "agentURI", "type": "string"}], "outputs": [{"name": "agentId", "type": "uint256"}]},
+    {"name": "approve", "type": "function", "stateMutability": "nonpayable",
+     "inputs": [{"name": "to", "type": "address"}, {"name": "tokenId", "type": "uint256"}], "outputs": []},
+    {"name": "setApprovalForAll", "type": "function", "stateMutability": "nonpayable",
+     "inputs": [{"name": "operator", "type": "address"}, {"name": "approved", "type": "bool"}], "outputs": []},
+    {"name": "isApprovedForAll", "type": "function", "stateMutability": "view",
+     "inputs": [{"name": "owner", "type": "address"}, {"name": "operator", "type": "address"}], "outputs": [{"name": "", "type": "bool"}]},
+    {"name": "getApproved", "type": "function", "stateMutability": "view",
+     "inputs": [{"name": "tokenId", "type": "uint256"}], "outputs": [{"name": "", "type": "address"}]},
+    {"name": "ownerOf", "type": "function", "stateMutability": "view",
+     "inputs": [{"name": "tokenId", "type": "uint256"}], "outputs": [{"name": "", "type": "address"}]},
+    {"name": "Transfer", "type": "event", "anonymous": False, "inputs": [
+        {"name": "from", "type": "address", "indexed": True}, {"name": "to", "type": "address", "indexed": True},
+        {"name": "tokenId", "type": "uint256", "indexed": True}]},
 ]
 
 
@@ -55,14 +74,31 @@ def tx_link(receipt) -> str:
     return hashscan_tx(receipt["transactionHash"].to_0x_hex())
 
 
+def hedera_account(name: str) -> tuple[str, Account]:
+    """(account ID, signer) for HEDERA_<NAME>_ID / HEDERA_<NAME>_KEY."""
+    name = name.upper()
+    return required(f"HEDERA_{name}_ID"), Account.from_key(required(f"HEDERA_{name}_KEY"))
+
+
 def deployed(w3, name: str):
-    """Returns (contract, deployments) for 'splitter' or 'creditLine'."""
+    """Returns (contract, deployments) for 'creditLine' or 'splitter' (the main agent's splitter)."""
     deployments = read_deployments()
     address = deployments.get(f"{name}EvmAddress")
     if not address:
         raise SystemExit(f"No {name} deployed yet.")
     abi_name = {"splitter": "IncomeSplitter", "creditLine": "CreditLine"}[name]
     return w3.eth.contract(address=address, abi=load_abi(abi_name)), deployments
+
+
+def splitter_address(name: str) -> tuple[str, str]:
+    """(EVM address, contract ID) of a named splitter; 'main' is the one the x402 gateway pays."""
+    deployments = read_deployments()
+    if name == "main":
+        return deployments["splitterEvmAddress"], deployments["splitterContractId"]
+    entry = deployments.get("splitters", {}).get(name)
+    if not entry:
+        raise SystemExit(f"No splitter named '{name}'. Run: deploy-splitter --name {name}")
+    return entry["evmAddress"], entry["contractId"]
 
 
 def deploy(w3, account, file_name: str, contract_name: str, args: tuple, gas: int):
@@ -77,93 +113,144 @@ def deploy(w3, account, file_name: str, contract_name: str, args: tuple, gas: in
 
 def deploy_credit_line() -> None:
     w3, account = web3(), operator()
-    contract, contract_id = deploy(
-        w3, account, "CreditLine.sol", "CreditLine", (account.address, account.address, FEE_BPS), 2_000_000
-    )
+    term = int(optional("CREDIT_TERM_SECONDS") or 7 * 24 * 3600)
+    grace = int(optional("CREDIT_GRACE_SECONDS") or 24 * 3600)
+    args = (Web3.to_checksum_address(IDENTITY_REGISTRY), account.address, FEE_BPS, term, grace,
+            account.address, account.address, account.address)
+    contract, contract_id = deploy(w3, account, "CreditLine.sol", "CreditLine", args, 3_000_000)
     write_deployments({"creditLineContractId": contract_id, "creditLineEvmAddress": contract.address})
-
-    deployments = read_deployments()
-    if deployments.get("splitterEvmAddress"):
-        splitter, _ = deployed(w3, "splitter")
-        if splitter.functions.creditLine().call() == "0x" + "0" * 40:
-            tx = splitter.functions.bindCreditLine(contract.address).build_transaction({"from": account.address, "gas": 100_000})
-            print(f"bindCreditLine() on splitter {deployments['splitterContractId']}: ok  {tx_link(send(w3, account, tx))}")
+    print(f"Fee {FEE_BPS / 100}%, term {term}s, grace {grace}s, ID registry {IDENTITY_REGISTRY}. "
+          "Deploy a new splitter next: a splitter binds to one credit line, once.")
 
 
-def deploy_splitter() -> None:
+def deploy_splitter(name: str) -> None:
     w3, account = web3(), operator()
+    credit_line = read_deployments().get("creditLineEvmAddress")
+    if not credit_line:
+        raise SystemExit("Deploy the credit line first: deploy-credit-line")
 
-    def payout(env_name: str) -> str:
+    def payout(env_name: str, fallback: str) -> str:
         account_id = optional(env_name)
-        return evm_address_of(account_id) if account_id else account.address
+        return evm_address_of(account_id) if account_id else fallback
 
+    owner = payout("OWNER_ACCOUNT_ID", evm_address_of(optional("HEDERA_OWNER_ID")) if optional("HEDERA_OWNER_ID") else account.address)
     usdc = long_zero_address(required("USDC_TOKEN_ID"))
-    args = (usdc, payout("OWNER_ACCOUNT_ID"), payout("POOL_ACCOUNT_ID"), payout("COMPUTE_BUCKET_ACCOUNT_ID"), LENDER_BPS, COMPUTE_BPS)
+    args = (usdc, owner, payout("POOL_ACCOUNT_ID", account.address), payout("COMPUTE_BUCKET_ACCOUNT_ID", account.address),
+            LENDER_BPS, COMPUTE_BPS)
     splitter, contract_id = deploy(w3, account, "IncomeSplitter.sol", "IncomeSplitter", args, 1_500_000)
-    write_deployments({"splitterContractId": contract_id, "splitterEvmAddress": splitter.address})
-
     receipt = send(w3, account, splitter.functions.associateUsdc().build_transaction({"from": account.address, "gas": 1_000_000}))
     print(f"associateUsdc(): ok  {tx_link(receipt)}")
+    receipt = send(w3, account, splitter.functions.bindCreditLine(credit_line).build_transaction({"from": account.address, "gas": 100_000}))
+    print(f"bindCreditLine(): ok  {tx_link(receipt)}")
 
-    credit_line = read_deployments().get("creditLineEvmAddress")
-    if credit_line:
-        tx = splitter.functions.bindCreditLine(credit_line).build_transaction({"from": account.address, "gas": 100_000})
-        print(f"bindCreditLine(): ok  {tx_link(send(w3, account, tx))}")
-    print(f"x402 payTo = {contract_id}  {hashscan_contract(contract_id)}")
+    if name == "main":
+        write_deployments({"splitterContractId": contract_id, "splitterEvmAddress": splitter.address})
+    else:
+        splitters = read_deployments().get("splitters", {})
+        splitters[name] = {"contractId": contract_id, "evmAddress": splitter.address}
+        write_deployments({"splitters": splitters})
+    print(f"Splitter '{name}': payTo {contract_id}, owner payout {owner}  {hashscan_contract(contract_id)}")
 
 
-def set_limit(agent_id: int, agent_account: str, limit: str, zg_account: str | None) -> None:
+def register_agent(owner_name: str, uri: str) -> None:
+    """The owner mints the agent's ERC-8004 ID and approves the CreditLine to hold it while the agent owes."""
+    w3 = web3()
+    _, owner = hedera_account(owner_name)
+    credit_line, _ = deployed(w3, "creditLine")
+    identity = w3.eth.contract(address=Web3.to_checksum_address(IDENTITY_REGISTRY), abi=IDENTITY_ABI)
+    receipt = send(w3, owner, identity.functions.register(uri).build_transaction({"from": owner.address, "gas": 600_000}))
+    minted = [e for e in identity.events.Transfer().process_receipt(receipt, errors=DISCARD) if e["args"]["from"] == ZERO_ADDRESS]
+    if not minted:
+        raise SystemExit("No ERC-8004 ID minted")
+    agent_id = minted[0]["args"]["tokenId"]
+    print(f"ERC-8004 agent ID {agent_id} minted to {owner.address}  {tx_link(receipt)}")
+    approve_collateral(owner_name)
+
+
+def approve_collateral(owner_name: str) -> None:
+    """One-time permission for the CreditLine to hold the owner's agent IDs while they owe money.
+
+    An operator approval (setApprovalForAll) survives the ID moving into escrow and back; a per-token
+    approval is cleared by every transfer, so the owner would have to re-approve after each repayment.
+    """
+    w3 = web3()
+    _, owner = hedera_account(owner_name)
+    credit_line, _ = deployed(w3, "creditLine")
+    identity = w3.eth.contract(address=Web3.to_checksum_address(IDENTITY_REGISTRY), abi=IDENTITY_ABI)
+    if identity.functions.isApprovedForAll(owner.address, credit_line.address).call():
+        print("The CreditLine is already approved to hold this owner's agent IDs as collateral")
+        return
+    tx = identity.functions.setApprovalForAll(credit_line.address, True).build_transaction({"from": owner.address, "gas": 100_000})
+    print(f"setApprovalForAll(CreditLine): IDs can be held as collateral while their agents owe  {tx_link(send(w3, owner, tx))}")
+
+
+def set_limit(agent_id: int, agent_account: str, limit: str, splitter_name: str, zg_account: str | None) -> None:
     w3, account = web3(), operator()
-    credit_line, deployments = deployed(w3, "creditLine")
+    credit_line, _ = deployed(w3, "creditLine")
     agent = evm_address_of(agent_account)
+    splitter, _ = splitter_address(splitter_name)
     zg = Web3.to_checksum_address(zg_account or optional("ZG_AGENT_ADDRESS") or agent)
     decision_hash = Web3.keccak(text=f"limit {agent_id} {limit} USDC")
-    tx = credit_line.functions.setLimit(
-        agent_id, agent, deployments["splitterEvmAddress"], zg, usdc_atomic(limit), decision_hash
-    ).build_transaction({"from": account.address, "gas": 300_000})
-    print(f"setLimit(agent {agent_id}, {limit} USDC, 0G account {zg}): ok  {tx_link(send(w3, account, tx))}")
-
-
-def request_draw(agent_id: int, amount: str) -> None:
-    w3 = web3()
-    agent = Account.from_key(required("HEDERA_AGENT_KEY"))
-    credit_line, _ = deployed(w3, "creditLine")
-    tx = credit_line.functions.requestDraw(agent_id, usdc_atomic(amount)).build_transaction(
-        {"from": agent.address, "gas": 300_000}
+    tx = credit_line.functions.setLimit(agent_id, agent, splitter, zg, usdc_atomic(limit), decision_hash).build_transaction(
+        {"from": account.address, "gas": 400_000}
     )
+    print(f"setLimit(agent {agent_id}, {limit} USDC, splitter '{splitter_name}', 0G {zg}): ok  {tx_link(send(w3, account, tx))}")
+
+
+def request_draw(agent_id: int, amount: str, agent_name: str) -> None:
+    w3 = web3()
+    _, agent = hedera_account(agent_name)
+    credit_line, _ = deployed(w3, "creditLine")
+    tx = credit_line.functions.requestDraw(agent_id, usdc_atomic(amount)).build_transaction({"from": agent.address, "gas": 500_000})
     receipt = send(w3, agent, tx)
+    for event in credit_line.events.IdLocked().process_receipt(receipt, errors=DISCARD):
+        print(f"Agent ID {event['args']['agentId']} locked as collateral")
     for event in credit_line.events.DrawRequested().process_receipt(receipt, errors=DISCARD):
         a = event["args"]
-        print(f"Loan request #{a['drawId']}: {format_usdc(a['amount'])} to 0G account {a['zgAccount']}; "
-              f"owed now {format_usdc(a['owedAfter'])}  {tx_link(receipt)}")
+        print(f"Loan #{a['drawId']}: {format_usdc(a['amount'])} to 0G account {a['zgAccount']}; owed now {format_usdc(a['owedAfter'])}, "
+              f"due {time.strftime('%Y-%m-%d %H:%M', time.localtime(a['dueAt']))}  {tx_link(receipt)}")
+
+
+def operator_call(function_name: str, *args) -> None:
+    w3, account = web3(), operator()
+    credit_line, _ = deployed(w3, "creditLine")
+    tx = getattr(credit_line.functions, function_name)(*args).build_transaction({"from": account.address, "gas": 400_000})
+    print(f"{function_name}{args}: ok  {tx_link(send(w3, account, tx))}")
 
 
 def credit_status(agent_id: int) -> None:
     w3 = web3()
     credit_line, _ = deployed(w3, "creditLine")
-    agent, splitter, zg_account, limit, _ = credit_line.functions.lines(agent_id).call()
+    agent, owner, splitter, zg_account, limit, _, due_at, id_locked, status = credit_line.functions.lines(agent_id).call()
+    if status == 0:
+        raise SystemExit(f"No line for agent {agent_id}")
     owed = credit_line.functions.owedOf(agent_id).call()
     available = credit_line.functions.availableOf(agent_id).call()
-    print(f"Agent {agent_id}: agent {agent}, splitter {splitter}, 0G account {zg_account}")
-    print(f"  limit {format_usdc(limit)}, owed {format_usdc(owed)}, available {format_usdc(available)}")
+    identity = w3.eth.contract(address=Web3.to_checksum_address(IDENTITY_REGISTRY), abi=IDENTITY_ABI)
+    holder = identity.functions.ownerOf(agent_id).call()
+    who = {credit_line.address: "the CreditLine (collateral)", owner: "its owner"}.get(holder, holder)
+    print(f"Agent {agent_id}: {STATUS[status]}; agent {agent}; owner {owner}; splitter {splitter}; 0G account {zg_account}")
+    print(f"  limit {format_usdc(limit)}, owed {format_usdc(owed)}, available {format_usdc(available)}"
+          + (f", due {time.strftime('%Y-%m-%d %H:%M', time.localtime(due_at))}" if due_at else ""))
+    print(f"  ID held by {who}" + (" (locked)" if id_locked else ""))
     for draw_id in range(credit_line.functions.drawCount().call()):
         draw_agent, amount, zg_tx = credit_line.functions.draws(draw_id).call()
         if draw_agent == agent_id:
-            status = f"0G tx 0x{zg_tx.hex()}" if any(zg_tx) else "awaiting deposit"
-            print(f"  loan #{draw_id}: {format_usdc(amount)}, {status}")
+            print(f"  loan #{draw_id}: {format_usdc(amount)}, " + (f"0G tx 0x{zg_tx.hex()}" if any(zg_tx) else "awaiting 0G deposit"))
 
 
-def splitter_balance() -> None:
+def splitter_balance(name: str) -> None:
     w3 = web3()
-    splitter, deployments = deployed(w3, "splitter")
-    balance = token_balance(deployments["splitterContractId"], required("USDC_TOKEN_ID"))
-    print(f"Splitter {deployments['splitterContractId']} holds {format_usdc(balance)}; "
+    address, contract_id = splitter_address(name)
+    splitter = w3.eth.contract(address=address, abi=load_abi("IncomeSplitter"))
+    print(f"Splitter '{name}' {contract_id} holds {format_usdc(token_balance(contract_id, required('USDC_TOKEN_ID')))}; "
           f"owed to pool {format_usdc(splitter.functions.owed().call())}")
 
 
-def sweep() -> None:
+def sweep(name: str) -> None:
     w3, account = web3(), operator()
-    splitter, _ = deployed(w3, "splitter")
+    address, _ = splitter_address(name)
+    splitter = w3.eth.contract(address=address, abi=load_abi("IncomeSplitter"))
     receipt = send(w3, account, splitter.functions.sweep().build_transaction({"from": account.address, "gas": 500_000}))
     for event in splitter.events.Swept().process_receipt(receipt, errors=DISCARD):
         a = event["args"]
@@ -172,10 +259,10 @@ def sweep() -> None:
 
 
 def send_usdc(to: str, amount: str) -> None:
-    """Sends USDC from the operator to another Hedera account (through the token's ERC-20 facade)."""
+    """Sends USDC from the operator to a Hedera account or contract (through the token's ERC-20 facade)."""
     w3, account = web3(), operator()
     usdc_id = required("USDC_TOKEN_ID")
-    token = w3.eth.contract(address=long_zero_address(usdc_id), abi=ERC20_TRANSFER_ABI)
+    token = w3.eth.contract(address=long_zero_address(usdc_id), abi=ERC20_ABI)
     tx = token.functions.transfer(evm_address_of(to), usdc_atomic(amount)).build_transaction({"from": account.address, "gas": 100_000})
     print(f"Sent {amount} USDC to {to}  {tx_link(send(w3, account, tx))}")
     time.sleep(6)  # mirror node lag
@@ -185,34 +272,51 @@ def send_usdc(to: str, amount: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="overdraft")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("deploy-credit-line", "deploy-splitter", "splitter-balance", "sweep"):
-        sub.add_parser(name)
+    sub.add_parser("deploy-credit-line")
+    p = sub.add_parser("deploy-splitter")
+    p.add_argument("--name", default="main")
+    p = sub.add_parser("register-agent")
+    p.add_argument("--owner", default="OWNER", help="the HEDERA_<NAME> account that owns the agent's ID")
+    p.add_argument("--uri", default="https://github.com/vansh0112/overdraft")
+    sub.add_parser("approve-collateral").add_argument("--owner", default="OWNER")
     p = sub.add_parser("set-limit")
     p.add_argument("agent_id", type=int)
     p.add_argument("agent_account", help="the agent's Hedera account ID")
     p.add_argument("limit", help="limit in USDC, fee included")
+    p.add_argument("--splitter", default="main")
     p.add_argument("--zg-account", help="the agent's 0G compute account (defaults to ZG_AGENT_ADDRESS)")
     p = sub.add_parser("request-draw")
     p.add_argument("agent_id", type=int)
-    p.add_argument("amount", help="loan amount in USDC")
-    p = sub.add_parser("credit-status")
+    p.add_argument("amount")
+    p.add_argument("--agent", default="AGENT", help="the HEDERA_<NAME> account that signs as the agent")
+    for name in ("release-id", "mark-overdue", "credit-status"):
+        sub.add_parser(name).add_argument("agent_id", type=int)
+    p = sub.add_parser("flag-breach")
     p.add_argument("agent_id", type=int)
+    p.add_argument("reason")
+    for name in ("splitter-balance", "sweep"):
+        sub.add_parser(name).add_argument("--name", default="main")
     p = sub.add_parser("send-usdc")
     p.add_argument("to")
     p.add_argument("amount")
-    args = parser.parse_args()
+    a = parser.parse_args()
 
-    if args.command == "set-limit":
-        set_limit(args.agent_id, args.agent_account, args.limit, args.zg_account)
-    elif args.command == "request-draw":
-        request_draw(args.agent_id, args.amount)
-    elif args.command == "credit-status":
-        credit_status(args.agent_id)
-    elif args.command == "send-usdc":
-        send_usdc(args.to, args.amount)
-    else:
-        {"deploy-credit-line": deploy_credit_line, "deploy-splitter": deploy_splitter,
-         "splitter-balance": splitter_balance, "sweep": sweep}[args.command]()
+    actions = {
+        "deploy-credit-line": deploy_credit_line,
+        "deploy-splitter": lambda: deploy_splitter(a.name),
+        "register-agent": lambda: register_agent(a.owner, a.uri),
+        "approve-collateral": lambda: approve_collateral(a.owner),
+        "set-limit": lambda: set_limit(a.agent_id, a.agent_account, a.limit, a.splitter, a.zg_account),
+        "request-draw": lambda: request_draw(a.agent_id, a.amount, a.agent),
+        "release-id": lambda: operator_call("releaseId", a.agent_id),
+        "mark-overdue": lambda: operator_call("markOverdue", a.agent_id),
+        "flag-breach": lambda: operator_call("flagBreach", a.agent_id, a.reason),
+        "credit-status": lambda: credit_status(a.agent_id),
+        "splitter-balance": lambda: splitter_balance(a.name),
+        "sweep": lambda: sweep(a.name),
+        "send-usdc": lambda: send_usdc(a.to, a.amount),
+    }
+    actions[a.command]()
 
 
 if __name__ == "__main__":

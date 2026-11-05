@@ -25,7 +25,8 @@ from .solidity import load_abi
 
 SCHEMA = "overdraft.bureau"
 DAY = arkiv.BLOCKS_PER_DAY
-LIFETIME_BLOCKS = {"decision": 90 * DAY, "loan": 180 * DAY, "disbursed": 180 * DAY, "repayment": 90 * DAY, "repaid": 180 * DAY}
+LIFETIME_BLOCKS = {"decision": 90 * DAY, "loan": 180 * DAY, "disbursed": 180 * DAY, "repayment": 90 * DAY, "repaid": 180 * DAY,
+                   "default": 90 * DAY}
 STATE_PATH = ROOT / "python" / ".state" / "bureau.json"
 
 
@@ -76,7 +77,9 @@ def decode(contract, log: dict):
     return None
 
 
-def records_for(name: str, args, tx_hash: str, splitter_agents: dict) -> list[tuple[str, list[Attr]]]:
+def records_for(name: str, args, tx_hash: str, state: dict) -> list[tuple[str, list[Attr]]]:
+    splitter_agents = state["splitterAgents"]
+
     def base(kind: str, agent_id: int) -> list[Attr]:
         return [Attr("arkiv.schema", "str", SCHEMA), Attr("kind", "str", kind), Attr("agentId", "u64", agent_id),
                 Attr("hederaTx", "str", tx_hash, indexed=False)]
@@ -86,6 +89,7 @@ def records_for(name: str, args, tx_hash: str, splitter_agents: dict) -> list[tu
         return [("decision", base("decision", args["agentId"]) + [
             Attr("limit", "u64", args["limit"]),
             Attr("agent", "addr", args["agent"], indexed=False),
+            Attr("owner", "addr", args["owner"], indexed=False),
             Attr("zgAccount", "addr", args["zgAccount"], indexed=False),
             Attr("decisionHash", "str", "0x" + bytes(args["decisionHash"]).hex(), indexed=False),
         ])]
@@ -94,6 +98,7 @@ def records_for(name: str, args, tx_hash: str, splitter_agents: dict) -> list[tu
             Attr("drawId", "u64", args["drawId"]),
             Attr("amount", "u64", args["amount"]),
             Attr("owedAfter", "u64", args["owedAfter"]),
+            Attr("dueAt", "u64", args["dueAt"]),
             Attr("zgAccount", "addr", args["zgAccount"], indexed=False),
         ])]
     if name == "Disbursed":
@@ -105,24 +110,38 @@ def records_for(name: str, args, tx_hash: str, splitter_agents: dict) -> list[tu
         agent_id = splitter_agents.get(args.get("_splitter", ""))
         if agent_id is None or args["toPool"] == 0:
             return []
-        out = [("repayment", base("repayment", agent_id) + [
+        return [("repayment", base("repayment", agent_id) + [
             Attr("amount", "u64", args["toPool"]),
             Attr("owedAfter", "u64", args["owedAfter"]),
         ])]
-        if args["owedAfter"] == 0:
-            out.append(("repaid", base("repaid", agent_id)))
-        return out
+    if name == "IdReleased":
+        return [("repaid", base("repaid", args["agentId"]))]
+    if name == "Breach":
+        state.setdefault("breachReasons", {})[str(args["agentId"])] = args["reason"][:120]
+        return []
+    if name == "Defaulted":
+        reason = state.get("breachReasons", {}).get(str(args["agentId"]), "debt overdue past the grace period")
+        return [("default", base("default", args["agentId"]) + [
+            Attr("owed", "u64", args["owed"]),
+            Attr("reason", "str", reason, indexed=False),
+        ])]
     return []
+
+
+def splitter_ids(deployments: dict) -> list[str]:
+    """Every agent's splitter: the main one and any named ones."""
+    ids = [deployments["splitterContractId"]] if deployments.get("splitterContractId") else []
+    ids += [entry["contractId"] for entry in deployments.get("splitters", {}).values()]
+    return ids
 
 
 def sync_once(state: dict) -> int:
     """Writes every new fact since the last sync to Arkiv in one batch. Returns how many were written."""
     deployments = read_deployments()
     w3 = Web3()
-    sources = [
-        (deployments["creditLineContractId"], w3.eth.contract(abi=load_abi("CreditLine"))),
-        (deployments["splitterContractId"], w3.eth.contract(abi=load_abi("IncomeSplitter"))),
-    ]
+    splitter_abi = load_abi("IncomeSplitter")
+    sources = [(deployments["creditLineContractId"], w3.eth.contract(abi=load_abi("CreditLine")))]
+    sources += [(contract_id, w3.eth.contract(abi=splitter_abi)) for contract_id in splitter_ids(deployments)]
     pending: list[tuple[str, list[Attr]]] = []
     cursors = dict(state["cursors"])
     for contract_id, contract in sources:  # credit line first, so splitters map to agents
@@ -132,7 +151,7 @@ def sync_once(state: dict) -> int:
                 name, args = decoded
                 args = dict(args)
                 args["_splitter"] = log["address"].lower()
-                pending.extend(records_for(name, args, log["transaction_hash"], state["splitterAgents"]))
+                pending.extend(records_for(name, args, log["transaction_hash"], state))
             cursors[contract_id] = {"timestamp": log["timestamp"], "index": log["index"]}
 
     if pending:
@@ -171,12 +190,13 @@ def report(agent_id: int) -> None:
         days_left = (int(entity["expiresAt"], 16) - current) / DAY
         rows.append((attrs, days_left))
     print(f"Agent {agent_id}: {int(page.get('count', '0x0'), 16)} record(s) on Arkiv (owner {bureau})")
-    order = {"decision": 0, "loan": 1, "disbursed": 2, "repayment": 3, "repaid": 4}
+    order = {"decision": 0, "loan": 1, "disbursed": 2, "repayment": 3, "repaid": 4, "default": 5}
     for attrs, days_left in sorted(rows, key=lambda r: (order.get(r[0]["kind"], 9), r[0].get("drawId", "0x0"))):
-        amount = attrs.get("amount") or attrs.get("limit")
+        amount = attrs.get("amount") or attrs.get("limit") or attrs.get("owed")
         money = f" {format_usdc(int(amount, 16))}" if amount else ""
         owed = f", owed after {format_usdc(int(attrs['owedAfter'], 16))}" if "owedAfter" in attrs else ""
-        print(f"  {attrs['kind']:<9}{money}{owed}  expires in {days_left:.0f} days  {hashscan_tx(attrs['hederaTx'])}")
+        reason = f" ({attrs['reason']})" if "reason" in attrs else ""
+        print(f"  {attrs['kind']:<9}{money}{owed}{reason}  expires in {days_left:.0f} days  {hashscan_tx(attrs['hederaTx'])}")
     print(f"Query: {condition}")
 
 

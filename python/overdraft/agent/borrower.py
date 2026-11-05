@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from eth_account import Account
 from web3.logs import DISCARD
 
+from ..cli import IDENTITY_ABI, IDENTITY_REGISTRY
 from ..config import read_deployments, required
 from ..hedera import hashscan_tx, send, web3
 from ..solidity import load_abi
@@ -37,8 +38,24 @@ class Borrower:
         if not address:
             raise SystemExit("No CreditLine deployed. Run: python -m overdraft.cli deploy-credit-line")
         self._credit_line = self._w3.eth.contract(address=address, abi=load_abi("CreditLine"))
+        self._identity = self._w3.eth.contract(address=self._w3.to_checksum_address(IDENTITY_REGISTRY), abi=IDENTITY_ABI)
         self.fee_bps = self._credit_line.functions.feeBps().call()
         self._in_flight = threading.Lock()
+        self.last_refusal: str | None = None
+
+    def collateral_ready(self) -> str | None:
+        """Why the agent can't borrow right now, or None if it can (line active, ID lockable or locked)."""
+        _, owner, _, _, _, _, _, id_locked, status = self._credit_line.functions.lines(self.agent_id).call()
+        if status == 0:
+            return "no credit line for this agent yet"
+        if status == 2:
+            return "the credit line has defaulted"
+        if not id_locked:
+            approved = self._identity.functions.isApprovedForAll(owner, self._credit_line.address).call() or (
+                self._identity.functions.getApproved(self.agent_id).call() == self._credit_line.address)
+            if not approved:
+                return "the owner hasn't approved the CreditLine to hold the agent's ID as collateral"
+        return None
 
     def shortfall_usd(self, jobs_waiting: int, cost_per_job_usd: float, balance_usd: float) -> float:
         return max(0.0, jobs_waiting * cost_per_job_usd - balance_usd)
@@ -54,6 +71,9 @@ class Borrower:
         if shortfall_usd <= 0 or not self._in_flight.acquire(blocking=False):
             return None
         try:
+            self.last_refusal = self.collateral_ready()
+            if self.last_refusal:
+                return None
             available = self.available_usd()
             max_principal = available * BPS / (BPS + self.fee_bps)
             amount = min(math.ceil(shortfall_usd * 100) / 100, math.floor(max_principal * 100) / 100)

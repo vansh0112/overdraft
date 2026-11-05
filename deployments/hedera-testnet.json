@@ -1,6 +1,12 @@
 {
-  "splitterContractId": "0.0.11329379",
-  "splitterEvmAddress": "0xF2d0b0F618153ef71e8322912c525512A3C1d660",
-  "creditLineContractId": "0.0.11329388",
-  "creditLineEvmAddress": "0xC12201E932ED9f3B1cE69F7390137B342721d909"
+  "splitterContractId": "0.0.11330131",
+  "splitterEvmAddress": "0x8F2e28E5912191468A3D9B021F33DD29574A46D6",
+  "creditLineContractId": "0.0.11330129",
+  "creditLineEvmAddress": "0x16F7ffEa40A64632833dFfF6BE9b4E16C7F893EB",
+  "splitters": {
+    "breach-test": {
+      "contractId": "0.0.11330190",
+      "evmAddress": "0x6EC828892A91846a8EbdC85cE359DD6CbA10EE26"
+    }
+  }
 }

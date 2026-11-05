@@ -82,6 +82,8 @@ async def ensure_budget() -> None:
         return
     loan = await asyncio.to_thread(borrower.borrow, shortfall)
     if loan is None:
+        if borrower.last_refusal:
+            log("blocked", f"Can't borrow: {borrower.last_refusal}")
         return
     log("loan", f"Borrowed ${loan.amount_usd:.2f} for {state['waiting']} waiting jobs; owes ${loan.owed_after_usd:.4f}", loan.tx_url)
     if compute.mode == "placeholder":

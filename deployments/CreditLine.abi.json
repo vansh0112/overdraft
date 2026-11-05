@@ -3,6 +3,31 @@
     "inputs": [
       {
         "internalType": "address",
+        "name": "identity_",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "treasury_",
+        "type": "address"
+      },
+      {
+        "internalType": "uint16",
+        "name": "feeBps_",
+        "type": "uint16"
+      },
+      {
+        "internalType": "uint64",
+        "name": "termSeconds_",
+        "type": "uint64"
+      },
+      {
+        "internalType": "uint64",
+        "name": "graceSeconds_",
+        "type": "uint64"
+      },
+      {
+        "internalType": "address",
         "name": "underwriter_",
         "type": "address"
       },
@@ -12,9 +37,9 @@
         "type": "address"
       },
       {
-        "internalType": "uint16",
-        "name": "feeBps_",
-        "type": "uint16"
+        "internalType": "address",
+        "name": "watcher_",
+        "type": "address"
       }
     ],
     "stateMutability": "nonpayable",
@@ -27,7 +52,17 @@
   },
   {
     "inputs": [],
-    "name": "BadFee",
+    "name": "BadParams",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "LineDefaulted",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NoDebt",
     "type": "error"
   },
   {
@@ -46,6 +81,17 @@
     "type": "error"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint64",
+        "name": "dueAt",
+        "type": "uint64"
+      }
+    ],
+    "name": "NotOverdue",
+    "type": "error"
+  },
+  {
     "inputs": [],
     "name": "NotRelayer",
     "type": "error"
@@ -53,6 +99,16 @@
   {
     "inputs": [],
     "name": "NotUnderwriter",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NotWatcher",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NothingLocked",
     "type": "error"
   },
   {
@@ -73,8 +129,73 @@
   },
   {
     "inputs": [],
+    "name": "Reentrant",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SplitterLocked",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "owed",
+        "type": "uint256"
+      }
+    ],
+    "name": "StillOwed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "ZeroAmount",
     "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "agentId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "reason",
+        "type": "string"
+      }
+    ],
+    "name": "Breach",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "agentId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "owed",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "idSentTo",
+        "type": "address"
+      }
+    ],
+    "name": "Defaulted",
+    "type": "event"
   },
   {
     "anonymous": false,
@@ -133,6 +254,12 @@
         "internalType": "uint256",
         "name": "owedAfter",
         "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "dueAt",
+        "type": "uint64"
       }
     ],
     "name": "DrawRequested",
@@ -150,7 +277,51 @@
       {
         "indexed": false,
         "internalType": "address",
+        "name": "owner",
+        "type": "address"
+      }
+    ],
+    "name": "IdLocked",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "agentId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+      }
+    ],
+    "name": "IdReleased",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "agentId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
         "name": "agent",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "owner",
         "type": "address"
       },
       {
@@ -198,9 +369,9 @@
       },
       {
         "indexed": false,
-        "internalType": "uint16",
-        "name": "feeBps",
-        "type": "uint16"
+        "internalType": "address",
+        "name": "watcher",
+        "type": "address"
       }
     ],
     "name": "RolesSet",
@@ -227,6 +398,25 @@
         "internalType": "address",
         "name": "",
         "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "agentOfSplitter",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -310,6 +500,50 @@
     "inputs": [
       {
         "internalType": "uint256",
+        "name": "agentId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "reason",
+        "type": "string"
+      }
+    ],
+    "name": "flagBreach",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "graceSeconds",
+    "outputs": [
+      {
+        "internalType": "uint64",
+        "name": "",
+        "type": "uint64"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "identity",
+    "outputs": [
+      {
+        "internalType": "contract IAgentIdentity",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
         "name": "",
         "type": "uint256"
       }
@@ -319,6 +553,11 @@
       {
         "internalType": "address",
         "name": "agent",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "owner",
         "type": "address"
       },
       {
@@ -340,6 +579,21 @@
         "internalType": "bytes32",
         "name": "decisionHash",
         "type": "bytes32"
+      },
+      {
+        "internalType": "uint64",
+        "name": "dueAt",
+        "type": "uint64"
+      },
+      {
+        "internalType": "bool",
+        "name": "idLocked",
+        "type": "bool"
+      },
+      {
+        "internalType": "enum CreditLine.Status",
+        "name": "status",
+        "type": "uint8"
       }
     ],
     "stateMutability": "view",
@@ -359,6 +613,19 @@
       }
     ],
     "name": "markDisbursed",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "agentId",
+        "type": "uint256"
+      }
+    ],
+    "name": "markOverdue",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -393,6 +660,19 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "agentId",
+        "type": "uint256"
+      }
+    ],
+    "name": "releaseId",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -470,9 +750,9 @@
         "type": "address"
       },
       {
-        "internalType": "uint16",
-        "name": "feeBps_",
-        "type": "uint16"
+        "internalType": "address",
+        "name": "watcher_",
+        "type": "address"
       }
     ],
     "name": "setRoles",
@@ -482,7 +762,46 @@
   },
   {
     "inputs": [],
+    "name": "termSeconds",
+    "outputs": [
+      {
+        "internalType": "uint64",
+        "name": "",
+        "type": "uint64"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "treasury",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "underwriter",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "watcher",
     "outputs": [
       {
         "internalType": "address",
