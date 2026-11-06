@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Footer, Nav } from "@/components/brand";
 import { DEPLOYMENTS, hashscan } from "@/lib/deployments";
 
@@ -10,6 +11,8 @@ export const metadata: Metadata = {
 const sections = [
   ["overview", "Overview"],
   ["loan", "How a loan works"],
+  ["enrol", "Enrol an agent"],
+  ["borrow", "Borrow from your agent"],
   ["underwriting", "Underwriting"],
   ["collateral", "Collateral and defaults"],
   ["watcher", "The watcher"],
@@ -67,7 +70,7 @@ export default function Docs() {
   return (
     <div className="flex min-h-full flex-1 flex-col bg-paper text-ink">
       <Nav surface="paper" />
-      <main className="mx-auto grid w-full max-w-[1200px] flex-1 gap-12 px-4 py-14 sm:px-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <main className="mx-auto grid w-full max-w-[1200px] flex-1 grid-cols-1 gap-12 px-4 py-14 sm:px-6 lg:grid-cols-[220px_minmax(0,1fr)]">
         <aside className="hidden lg:block">
           <nav className="sticky top-8 text-[14px]" aria-label="Docs sections">
             <div className="font-mono text-[11px] uppercase tracking-[0.1em] text-slate">Docs</div>
@@ -81,7 +84,7 @@ export default function Docs() {
           </nav>
         </aside>
 
-        <article className="max-w-[760px]">
+        <article className="min-w-0 max-w-[760px]">
           <div className="font-mono text-[12px] uppercase tracking-[0.1em] text-slate">Documentation</div>
           <h1 className="mt-4 font-serif text-[56px] leading-none">How Overdraft works</h1>
 
@@ -116,6 +119,125 @@ export default function Docs() {
             <P>
               Every loan carries a flat 5% fee, fixed when the contract was deployed. The agent decides when to borrow and signs its own loan
               requests; the contract refuses anything over its limit.
+            </P>
+          </div>
+
+          <div className="mt-12">
+            <H2 id="enrol">Enrol an agent</H2>
+            <P>
+              Any agent that sells its work over x402 in USDC on Hedera testnet can apply. Its owner enrols it on the{" "}
+              <Link href="/enrol" className="text-ink underline decoration-paper-line underline-offset-4 hover:decoration-ink">enrol page</Link> with a
+              browser wallet such as MetaMask, holding a little test HBAR from the{" "}
+              <a href="https://portal.hedera.com/faucet" target="_blank" rel="noreferrer" className="text-ink underline decoration-paper-line underline-offset-4 hover:decoration-ink">
+                Hedera faucet
+              </a>
+              .
+            </P>
+            <Table
+              head={["Step", "What happens", "Who pays"]}
+              rows={[
+                ["1", "Connect the wallet that will own the agent's ID, on Hedera testnet.", "Nothing"],
+                ["2", "Pick the agent's ERC-8004 ID, or register one. Its name is stored on-chain in the ID's registration file.", "Owner, a few cents of HBAR"],
+                ["3", <>Approve the CreditLine to hold the owner&apos;s IDs while their agents owe (<C>setApprovalForAll</C>). An ID only moves when its agent borrows.</>, "Owner, a few cents of HBAR"],
+                ["4", "Give the agent's wallet, its 0G compute account, its paid endpoint, where it has been paid so far and its AI cost per job.", "Nothing"],
+                ["5", "Sign the application (EIP-712). The lender deploys the agent's IncomeSplitter, binds it to the CreditLine, opens the line with no credit and publishes the signed application on Arkiv.", "Lender"],
+              ]}
+            />
+            <P>
+              Before anything is deployed the API checks that the signer owns the ID and has approved it as collateral, that their account can
+              receive USDC, that the agent has no line yet, and that the endpoint answers an unpaid request with x402 terms in USDC on Hedera
+              testnet. The application&apos;s hash becomes the line&apos;s decision hash, so the line points to what the owner signed.
+            </P>
+            <P>
+              Then the owner sets the endpoint&apos;s <C>payTo</C> to the new income contract. Once a few customers have paid it, the owner signs a
+              credit check on the agent&apos;s page. It only runs while the endpoint asks customers to pay the income contract, because that is how loans
+              get repaid. The underwriter traces the income as described below, publishes the decision on Arkiv and sets the limit, or shows what
+              is still missing. Each agent can be checked once every ten minutes.
+            </P>
+            <Code>{`// your x402 endpoint: customers pay the agent's income contract
+paymentMiddleware({
+  "POST /translate": {
+    accepts: [{ scheme: "exact", network: "hedera:testnet", payTo: "0.0.INCOME_CONTRACT",
+                price: { amount: "20000", asset: "0.0.429274" } }],   // $0.02 in USDC
+  },
+}, server);`}</Code>
+          </div>
+
+          <div className="mt-12">
+            <H2 id="borrow">Borrow from your agent</H2>
+            <P>
+              Repayment, the 0G deposit and the collateral need nothing from the agent. Borrowing does: only the agent wallet named at enrolment
+              can request a loan, at the moment it runs short. Call this when the jobs waiting cost more than the agent&apos;s AI balance. Amounts
+              are in USDC units with 6 decimals, so <C>10000</C> is $0.01.
+            </P>
+            <Code>{`import { createPublicClient, createWalletClient, http, parseAbi } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { hederaTestnet } from "viem/chains";
+
+const CREDIT_LINE = "0x16F7ffEa40A64632833dFfF6BE9b4E16C7F893EB";
+const abi = parseAbi([
+  "function availableOf(uint256 agentId) view returns (uint256)",
+  "function feeBps() view returns (uint16)",
+  "function requestDraw(uint256 agentId, uint256 amount) returns (uint256 drawId)",
+  "error OverLimit(uint256 requestedWithFee, uint256 available)",
+  "error NotAgent()",
+  "error LineDefaulted()",
+]);
+
+const agent = privateKeyToAccount(process.env.AGENT_KEY as \`0x\${string}\`); // the agent wallet you enrolled
+const chain = createPublicClient({ chain: hederaTestnet, transport: http() });
+const wallet = createWalletClient({ account: agent, chain: hederaTestnet, transport: http() });
+
+/** Borrows the shortfall, in USDC units (6 decimals), when queued jobs cost more than the AI balance. */
+export async function borrow(agentId: bigint, shortfall: bigint) {
+  const [available, feeBps] = await Promise.all([
+    chain.readContract({ address: CREDIT_LINE, abi, functionName: "availableOf", args: [agentId] }),
+    chain.readContract({ address: CREDIT_LINE, abi, functionName: "feeBps" }),
+  ]);
+  const most = (available * 10_000n) / (10_000n + BigInt(feeBps)); // the fee counts against the limit
+  const amount = shortfall < most ? shortfall : most;
+  if (amount === 0n) return null; // no credit left: serve what the balance covers
+  const { request } = await chain.simulateContract({ account: agent, address: CREDIT_LINE, abi, functionName: "requestDraw", args: [agentId, amount] });
+  const hash = await wallet.writeContract(request);
+  return chain.waitForTransactionReceipt({ hash });
+}`}</Code>
+            <P>The same in Python, with web3.py:</P>
+            <Code>{`import os
+
+from web3 import Web3
+
+CREDIT_LINE = "0x16F7ffEa40A64632833dFfF6BE9b4E16C7F893EB"
+ABI = [
+    {"name": "availableOf", "type": "function", "stateMutability": "view",
+     "inputs": [{"name": "agentId", "type": "uint256"}], "outputs": [{"name": "", "type": "uint256"}]},
+    {"name": "feeBps", "type": "function", "stateMutability": "view", "inputs": [], "outputs": [{"name": "", "type": "uint16"}]},
+    {"name": "requestDraw", "type": "function", "stateMutability": "nonpayable",
+     "inputs": [{"name": "agentId", "type": "uint256"}, {"name": "amount", "type": "uint256"}],
+     "outputs": [{"name": "drawId", "type": "uint256"}]},
+]
+
+w3 = Web3(Web3.HTTPProvider("https://testnet.hashio.io/api"))
+agent = w3.eth.account.from_key(os.environ["AGENT_KEY"])  # the agent wallet you enrolled
+line = w3.eth.contract(address=CREDIT_LINE, abi=ABI)
+
+
+def borrow(agent_id: int, shortfall: int):
+    """Borrows the shortfall, in USDC units (6 decimals), when queued jobs cost more than the AI balance."""
+    available = line.functions.availableOf(agent_id).call()
+    most = available * 10_000 // (10_000 + line.functions.feeBps().call())  # the fee counts against the limit
+    amount = min(shortfall, most)
+    if amount == 0:
+        return None  # no credit left: serve what the balance covers
+    tx = line.functions.requestDraw(agent_id, amount).build_transaction({
+        "from": agent.address, "nonce": w3.eth.get_transaction_count(agent.address), "gasPrice": w3.eth.gas_price,
+    })
+    signed = agent.sign_transaction(tx)
+    return w3.eth.wait_for_transaction_receipt(w3.eth.send_raw_transaction(signed.raw_transaction))`}</Code>
+            <P>
+              The first loan locks the agent&apos;s ID in the CreditLine. The relay deposits each loan into the agent&apos;s 0G compute account within
+              seconds and records the 0G transaction on Hedera. Every split of the agent&apos;s income pays the lender first, and when the debt reaches
+              zero the sweeper hands the ID back. A request over the limit reverts with <C>OverLimit</C>, one from any other wallet with{" "}
+              <C>NotAgent</C>, and one on a defaulted line with <C>LineDefaulted</C>.
             </P>
           </div>
 
@@ -225,7 +347,7 @@ python -m overdraft.sweeper                   # splits income, returns IDs
 python -m overdraft.relay                     # loans into 0G compute
 python -m overdraft.bureau watch              # credit history to Arkiv
 python -m overdraft.watcher                   # breaches and overdue debts
-uvicorn overdraft.console:app --port 8000     # data for this site
+uvicorn overdraft.console:app --port 8000     # data for this site, enrolment and credit checks
 
 # a rush of paid jobs
 npm --prefix gateway run rush -- 8`}</Code>
@@ -240,6 +362,9 @@ npm --prefix gateway run rush -- 8`}</Code>
               <li>0G&apos;s PaymentVault is upgradeable by 0G, and <C>transferCredit</C> can&apos;t be blocked; the watcher treats a transfer out as a breach.</li>
               <li>On testnet, the demo customers were funded from the lender&apos;s test wallet; the underwriter treats the lender&apos;s wallets as outside money.</li>
               <li>The 0G side runs in simulation until the lender wallet holds 0G: deposits are checked against the live PaymentVault without being sent.</li>
+              <li>An agent&apos;s AI cost per job is the owner&apos;s own figure, so the margin check is only as good as that number.</li>
+              <li>The lender pays to deploy each enrolled agent&apos;s income contract, so new enrolments are capped per day. Signed requests are good for ten minutes and only once.</li>
+              <li>The API fetches endpoints owners submit only at public https addresses, without following redirects. Agent names are read only from registration files stored on-chain.</li>
             </ul>
           </div>
         </article>
