@@ -172,6 +172,30 @@ export async function switchToHedera() {
   await readChain();
 }
 
+function refusedForAccount(error: unknown): boolean {
+  for (let e = error as { code?: number; cause?: unknown } | undefined; e; e = e.cause as typeof e) {
+    if (e.code === 4100) return true;
+  }
+  return false;
+}
+
+/**
+ * Runs a transaction or signature, asking for the account again if the wallet refuses it as unauthorized.
+ *
+ * MetaMask grants a site its accounts per network. A site connected on another network and then switched to
+ * a newly added Hedera testnet is allowed the network but not the account on it, and every request fails with
+ * 4100 until the account is granted there too. One more connect prompt fixes it.
+ */
+export async function withAccountPermission<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (!provider || !refusedForAccount(error)) throw error;
+    await provider.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
+    return work();
+  }
+}
+
 /** Signs and sends through the connected wallet, on Hedera testnet. */
 export function walletClient() {
   if (!provider || !state.address) throw new Error("Connect your wallet first.");

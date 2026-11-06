@@ -334,6 +334,10 @@ export function EnrolFlow() {
                 The ID stays in your wallet. When your agent borrows, the credit line holds it, and it comes back automatically once the loan is
                 repaid. If the agent doesn&apos;t repay, or redirects its income, the lender keeps it. This one approval covers all your agents.
               </p>
+              <Hint>
+                MetaMask shows this as a withdrawal request, because it lets the credit line move your agent IDs. It only does so when one of
+                your agents borrows.
+              </Hint>
               <button onClick={approve} disabled={busy !== null || !cfg} className={`${primary} mt-3`}>
                 {busy === "collateral" ? "Confirm in your wallet…" : "Approve"}
               </button>
