@@ -53,9 +53,14 @@ def check_url(url: str) -> str:
     return url
 
 
-def quote(url: str) -> dict:
-    """The terms an unpaid request gets: {"accepts": [...], "payTo": {accounts}}. ValueError if it isn't x402."""
-    check_url(url)
+def quote(url: str, *, trusted: bool = False) -> dict:
+    """The terms an unpaid request gets: {"accepts": [...], "payTo": {accounts}}. ValueError if it isn't x402.
+
+    `trusted` is for endpoints the operator configured (such as the demo agent's, on this machine); every
+    endpoint an owner submitted goes through check_url.
+    """
+    if not trusted:
+        check_url(url)
     try:
         response = requests.post(url, json={}, timeout=TIMEOUT_SECONDS, allow_redirects=False, stream=True)
     except requests.RequestException as error:

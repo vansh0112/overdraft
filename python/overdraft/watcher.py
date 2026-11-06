@@ -51,15 +51,16 @@ def save_state(state: dict) -> None:
     STATE_PATH.write_text(json.dumps(state, indent=2) + "\n")
 
 
-def endpoints() -> dict[int, str]:
-    """Each agent's paid endpoint: from its enrolment application, or WATCH_ENDPOINTS."""
+def endpoints() -> dict[int, tuple[str, bool]]:
+    """Each agent's paid endpoint and whether it's trusted: owners' from their applications (checked before
+    every request), or the operator's own from WATCH_ENDPOINTS."""
     try:
-        urls = {agent_id: found["record"]["endpoint"] for agent_id, found in applications.latest().items()}
+        urls = {agent_id: (found["record"]["endpoint"], False) for agent_id, found in applications.latest().items()}
     except Exception as error:  # Arkiv busy: keep watching the configured ones
         print(f"{time.strftime('%H:%M:%S')} applications unavailable ({str(error)[:80]})", flush=True)
         urls = {}
     pairs = [p.split("=", 1) for p in (optional("WATCH_ENDPOINTS") or "").split(",") if "=" in p]
-    return {**urls, **{int(agent_id): url.strip() for agent_id, url in pairs}}
+    return {**urls, **{int(agent_id): (url.strip(), True) for agent_id, url in pairs}}
 
 
 def credit_transfers(zg_accounts: list[str], state: dict) -> list[dict]:
@@ -112,12 +113,12 @@ def check_once(state: dict) -> None:
             line["done"] = True
             continue
         # 1. Income redirected away from the splitter.
-        url = urls.get(agent_id)
-        if not url:
+        if agent_id not in urls:
             continue
+        url, trusted = urls[agent_id]
         expected = contract_id_of(line["splitter"])
         try:
-            pay_to = endpoint.quote(url)["payTo"]
+            pay_to = endpoint.quote(url, trusted=trusted)["payTo"]
         except ValueError as error:  # an unreachable endpoint isn't a breach; it earns nothing either
             print(f"{time.strftime('%H:%M:%S')} agent {agent_id}: endpoint unreachable ({str(error)[:80]})", flush=True)
             continue
