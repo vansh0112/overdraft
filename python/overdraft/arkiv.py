@@ -73,13 +73,19 @@ class Attr:
 
 
 def rpc_url() -> str:
-    url = required("ARKIV_RPC_URL").rstrip("/")
+    return required("ARKIV_RPC_URL").rstrip("/")
+
+
+def _headers() -> dict:
+    """The access key travels in a header, never in the URL, so it can't show up in logs or error messages."""
     key = optional("ARKIV_ACCESS_KEY")
-    return f"{url}/{key}" if key else url
+    return {"X-API-KEY": key} if key else {}
 
 
 def web3() -> Web3:
-    return Web3(Web3.HTTPProvider(rpc_url(), request_kwargs={"timeout": 60}))
+    # Headers given here replace the provider's own, so keep its JSON content type and add the key.
+    headers = {**Web3.HTTPProvider(rpc_url()).get_request_headers(), **_headers()}
+    return Web3(Web3.HTTPProvider(rpc_url(), request_kwargs={"timeout": 60, "headers": headers}))
 
 
 def bureau():
@@ -173,7 +179,8 @@ def balance(address: str) -> int:
 
 def _rpc(method: str, params: list):
     for attempt in range(5):
-        response = requests.post(rpc_url(), json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params}, timeout=60)
+        response = requests.post(rpc_url(), json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params}, headers=_headers(),
+                                 timeout=60)
         if response.status_code not in (429, 502, 503, 504):
             break
         time.sleep(1.5 * (attempt + 1))  # rate limited or briefly unavailable: back off and retry
