@@ -141,6 +141,11 @@ export default function Docs() {
               testnet. The application&apos;s hash becomes the line&apos;s decision hash, so the line points to what the owner signed.
             </P>
             <P>
+            No endpoint of your own? Choose <strong>Use the Overdraft test endpoint</strong> on the enrol page. It fills in{" "}
+            <C>{"…/sandbox/<agent ID>/translate"}</C>, a paid x402 endpoint on our server with simulated work at $0.02 a job. Before enrolment it asks
+            customers to pay the agent&apos;s owner; afterwards it asks them to pay the agent&apos;s income contract, so the next step happens by itself.
+          </P>
+          <P>
               Then the owner sets the endpoint&apos;s <C>payTo</C> to the new income contract. Once a few customers have paid it, the owner signs a
               credit check on the agent&apos;s page. It only runs while the endpoint asks customers to pay the income contract, because that is how loans
               get repaid. The underwriter traces the income as described below, publishes the decision on Arkiv and sets the limit, or shows what

@@ -4,6 +4,15 @@ import { useCallback, useEffect, useState } from "react";
 
 export const API = (process.env.NEXT_PUBLIC_CONSOLE_API ?? "http://localhost:8000").replace(/\/$/, "");
 
+/** The Overdraft sandbox: a paid x402 test endpoint for any agent, which pays its income contract once enrolled. */
+export function sandboxEndpoint(agentId: number): string {
+  return `${API}/sandbox/${agentId}/translate`;
+}
+
+export function isSandboxEndpoint(url: string | null | undefined): boolean {
+  return Boolean(url && url.startsWith(`${API}/sandbox/`));
+}
+
 export type Contracts = {
   network: string;
   creditLine: { id: string; url: string };

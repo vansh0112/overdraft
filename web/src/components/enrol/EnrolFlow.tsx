@@ -4,8 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { getAddress, isAddress } from "viem";
-import { ArrowRight, Check, Copy, Plus, Wallet } from "lucide-react";
-import { ApiError, postJson, usePoll, type EnrolConfig, type EnrolResult, type Job, type OwnerView, type Readiness } from "@/lib/api";
+import { ArrowRight, Check, Copy, FlaskConical, Plus, Wallet } from "lucide-react";
+import { ApiError, isSandboxEndpoint, postJson, sandboxEndpoint, usePoll, type EnrolConfig, type EnrolResult, type Job, type OwnerView, type Readiness } from "@/lib/api";
 import { approveCollateral, registerAgent, registrationUri, signRequest } from "@/lib/contracts";
 import { short } from "@/lib/format";
 import { connectWallet, switchToHedera, useWallet, walletError } from "@/lib/wallet";
@@ -377,6 +377,27 @@ export function EnrolFlow() {
               <Hint>The x402 URL customers pay per job, in USDC on Hedera testnet. We check it answers with its price.</Hint>
               {errors.endpoint && <Problem>{errors.endpoint}</Problem>}
             </label>
+            {picked !== null && !isSandboxEndpoint(form.endpoint) && (
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, endpoint: sandboxEndpoint(picked) })}
+                className="-mt-2 flex w-full items-start gap-3 rounded-xl border border-dashed border-line-2 px-3.5 py-3 text-left transition hover:border-accent/60 hover:bg-accent/5"
+              >
+                <FlaskConical size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+                <span>
+                  <span className="block text-[13.5px] font-semibold text-fg">No endpoint yet? Use the Overdraft test endpoint</span>
+                  <span className="mt-0.5 block text-[12.5px] leading-relaxed text-muted">
+                    A ready-made paid endpoint for agent #{picked}: $0.02 a job in test USDC, with simulated work. Once enrolled it asks customers to pay
+                    your agent&apos;s income contract by itself.
+                  </span>
+                </span>
+              </button>
+            )}
+            {isSandboxEndpoint(form.endpoint) && (
+              <p className="-mt-2 flex items-center gap-2 text-[12.5px] text-muted">
+                <FlaskConical size={14} className="text-accent" aria-hidden="true" /> Using the Overdraft test endpoint.
+              </p>
+            )}
             <fieldset>
               <legend className="text-[13px] text-fg">Where have customers paid it so far?</legend>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -438,10 +459,17 @@ export function EnrolFlow() {
                 <div className="mt-2">
                   <CopyValue value={enrolled.result.splitterId} />
                 </div>
-                <p className="mt-3 text-[14px] leading-relaxed text-fg">
-                  Next, set your endpoint&apos;s x402 <span className="font-mono">payTo</span> to {enrolled.result.splitterId}. Every payment then repays
-                  loans first and sends the rest to you.
-                </p>
+                {isSandboxEndpoint(form.endpoint) ? (
+                  <p className="mt-3 text-[14px] leading-relaxed text-fg">
+                    Your test endpoint now asks customers to pay {enrolled.result.splitterId}, so there&apos;s nothing to change. Every payment repays loans
+                    first and sends the rest to you.
+                  </p>
+                ) : (
+                  <p className="mt-3 text-[14px] leading-relaxed text-fg">
+                    Next, set your endpoint&apos;s x402 <span className="font-mono">payTo</span> to {enrolled.result.splitterId}. Every payment then repays
+                    loans first and sends the rest to you.
+                  </p>
+                )}
                 <p className="mt-2 text-[13px] leading-relaxed text-muted">
                   Once a few customers have paid it, run a credit check on your agent&apos;s page. The check needs income from at least three independent
                   customers.

@@ -23,11 +23,13 @@ from contextlib import asynccontextmanager
 from functools import lru_cache, wraps
 
 import requests
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from web3 import Web3
+from web3.exceptions import ContractLogicError
 
 from . import applications, arkiv, endpoint, enrol, zg
 from .bureau import SCHEMA, bureau_address
@@ -36,6 +38,7 @@ from .config import ROOT, optional, read_deployments, required
 from .hedera import MIRROR, contract_id_of, hashscan_contract, hashscan_tx, long_zero_address, token_balance, web3
 from .registry import decode, new_logs
 from .solidity import load_abi
+from .underwriter import account_or_none
 
 USDC = 1_000_000
 X402_FEE_PAYERS = {"0.0.9185802"}  # the x402.org facilitator pays the fees of x402 payments on Hedera testnet
@@ -48,6 +51,8 @@ EVM_ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 REGISTER_SELECTOR = "0xf2c298be"  # register(string): mints a new ERC-8004 ID to the caller
 OWNER_LOOKUPS_PER_MINUTE = 30
 READINESS_CHECKS_PER_MINUTE = 120
+SANDBOX_CALLS_PER_MINUTE = 120
+SANDBOX_MAX_BODY = 16 * 1024
 SIGNATURE = r"^0x[0-9a-fA-F]{130}$"
 EVM_PATTERN = r"^0x[0-9a-fA-F]{40}$"  # request validators match anywhere unless anchored
 
@@ -791,3 +796,63 @@ def demo_check_fake_agent() -> dict:
 @app.get("/api/demo/last")
 def demo_last() -> dict:
     return _last_run
+
+
+# Sandbox endpoint ---------------------------------------------------------------------------------------
+#
+# A public x402 endpoint any tester can give their agent when enrolling on the live site, so nobody has to host
+# one. The gateway serves it (simulated work, $0.02 in USDC per job); this API is the public front door and tells
+# the gateway who customers should pay: the agent's splitter once it's enrolled, until then its owner. So the
+# step "point your endpoint at the income contract" happens by itself.
+
+GATEWAY = f"http://127.0.0.1:{optional('GATEWAY_PORT') or 4021}"
+SANDBOX_HEADERS_IN = {"content-type", "accept", "payment-signature", "x-payment", "user-agent"}
+SANDBOX_HEADERS_OUT = {"content-type", "payment-required", "payment-response", "x-payment-response", "cache-control"}
+sandbox_calls = PerMinute(SANDBOX_CALLS_PER_MINUTE, "sandbox requests")
+
+
+@lru_cache(maxsize=1024)
+def _splitter_id(address: str) -> str:
+    return contract_id_of(address)  # a contract's ID never changes
+
+
+@cached(seconds=15)
+def sandbox_pay_to(agent_id: int) -> dict:
+    w3 = hedera()
+    credit_line, _ = deployed(w3, "creditLine")
+    line = credit_line.functions.lines(agent_id).call()
+    if line[-1] != 0:
+        return {"agentId": agent_id, "payTo": _splitter_id(line[2]), "enrolled": True}
+    identity = w3.eth.contract(address=Web3.to_checksum_address(IDENTITY_REGISTRY), abi=IDENTITY_ABI)
+    try:
+        owner = identity.functions.ownerOf(agent_id).call()
+    except ContractLogicError as error:
+        raise HTTPException(status_code=404, detail=f"agent ID {agent_id} doesn't exist") from error
+    account = account_or_none(owner)
+    if not account:
+        raise HTTPException(status_code=404, detail="this agent's owner isn't on Hedera testnet yet: send their wallet free test HBAR")
+    return {"agentId": agent_id, "payTo": account, "enrolled": False}
+
+
+@app.get("/api/sandbox/{agent_id}/pay-to")
+def sandbox_pay_to_route(agent_id: int = Path(ge=0, le=999_999_999)) -> dict:
+    """Who the sandbox endpoint asks this agent's customers to pay."""
+    return sandbox_pay_to(agent_id)
+
+
+@app.api_route("/sandbox/{agent_id}/translate", methods=["GET", "POST"])
+async def sandbox(request: Request, agent_id: int = Path(ge=0, le=999_999_999)) -> Response:
+    """The sandbox endpoint itself, passed through to the gateway with its x402 headers both ways."""
+    sandbox_calls.spend()
+    body = await request.body()
+    if len(body) > SANDBOX_MAX_BODY:
+        raise HTTPException(status_code=413, detail="the request is too large")
+    headers = {k: v for k, v in request.headers.items() if k.lower() in SANDBOX_HEADERS_IN}
+    try:
+        upstream = await run_in_threadpool(
+            requests.request, request.method, f"{GATEWAY}/sandbox/{agent_id}/translate", data=body, headers=headers, timeout=60, allow_redirects=False
+        )
+    except requests.RequestException as error:
+        raise HTTPException(status_code=502, detail="the sandbox endpoint isn't running right now") from error
+    out = {k: v for k, v in upstream.headers.items() if k.lower() in SANDBOX_HEADERS_OUT}
+    return Response(content=upstream.content, status_code=upstream.status_code, headers=out)
