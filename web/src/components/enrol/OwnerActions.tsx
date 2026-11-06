@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CircleCheck, CircleX, ShieldCheck } from "lucide-react";
 import { ApiError, postJson, usePoll, type CheckResult, type EndpointStatus, type EnrolConfig, type Job, type Line } from "@/lib/api";
 import { signRequest } from "@/lib/contracts";
@@ -42,8 +42,11 @@ function Outcome({ result }: { result: CheckResult }) {
   );
 }
 
-/** What only the owner can do on an enrolled agent: point income at its contract, then ask for a credit check. */
-export function OwnerActions({ line }: { line: Line }) {
+/**
+ * What only the owner can do on an enrolled agent: point income at its contract, then ask for a credit check.
+ * `onFinished` runs when a check ends, so the page can show the new limit at once.
+ */
+export function OwnerActions({ line, onFinished }: { line: Line; onFinished?: () => void }) {
   const wallet = useWallet();
   const config = usePoll<EnrolConfig>("/api/enrol/config", 300_000);
   const endpoint = usePoll<EndpointStatus>(`/api/agents/${line.agentId}/endpoint`, 15_000);
@@ -53,6 +56,11 @@ export function OwnerActions({ line }: { line: Line }) {
 
   const current = job.data?.job;
   const running = current?.state === "queued" || current?.state === "running";
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !running) onFinished?.();
+    wasRunning.current = running;
+  }, [running, onFinished]);
   const pays = endpoint.data?.paysSplitter === true;
 
   async function check() {

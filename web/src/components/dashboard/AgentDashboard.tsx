@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import Link from "next/link";
 import { CircleX } from "lucide-react";
 import { API, usePoll, type ActivityEvent, type AgentSummary, type BureauRecord, type Compute, type Contracts, type Line } from "@/lib/api";
@@ -43,6 +43,17 @@ export function AgentDashboard({ agentId }: { agentId: number }) {
   const compute = usePoll<Compute>(hasLine ? `/api/agents/${agentId}/compute` : null, demo ? 4000 : 20000);
   const activity = usePoll<ActivityEvent[]>(hasLine ? `/api/agents/${agentId}/activity` : null, demo ? 5000 : 10000);
   const bureau = usePoll<BureauRecord[]>(ready && summary ? `/api/agents/${agentId}/bureau` : null, 20000);
+
+  const { reload: reloadLine } = line;
+  const { reload: reloadBureau } = bureau;
+  const { reload: reloadActivity } = activity;
+  const { reload: reloadAgents } = agents;
+  const refresh = useCallback(() => {
+    reloadLine();
+    reloadBureau();
+    reloadActivity();
+    reloadAgents();
+  }, [reloadLine, reloadBureau, reloadActivity, reloadAgents]);
 
   const owner = line.data?.owner ?? ownerAddress(summary);
   const isOwner = sameAddress(wallet.address, owner);
@@ -136,7 +147,7 @@ export function AgentDashboard({ agentId }: { agentId: number }) {
 
       {isOwner && line.data?.application && line.data.stage !== "defaulted" && (
         <div className="mt-8">
-          <OwnerActions line={line.data} />
+          <OwnerActions line={line.data} onFinished={refresh} />
         </div>
       )}
 

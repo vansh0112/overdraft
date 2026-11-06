@@ -207,6 +207,7 @@ class Job:
 
 
 _jobs: dict[tuple[str, int], Job] = {}
+_finished: list = []  # called with the agent ID when one of its jobs ends
 _jobs_lock = threading.Lock()
 _queue: queue.Queue = queue.Queue()
 _worker: threading.Thread | None = None
@@ -216,6 +217,11 @@ def job(kind: str, agent_id: int) -> dict | None:
     with _jobs_lock:
         found = _jobs.get((kind, agent_id))
         return found.public() if found else None
+
+
+def on_finished(listener) -> None:
+    """Registers a function called with the agent ID whenever an enrolment or credit check ends."""
+    _finished.append(listener)
 
 
 def start_worker() -> None:
@@ -258,6 +264,11 @@ def _run_jobs() -> None:
             print(f"{time.strftime('%H:%M:%S')} {current.kind} for agent {current.agent_id} failed: {error}", flush=True)
             current.error, current.state = f"something went wrong on-chain: {str(error)[:160]}", "failed"
         current.updated_at = time.time()
+        for listener in _finished:
+            try:
+                listener(current.agent_id)
+            except Exception as error:  # a listener's trouble never stops the worker
+                print(f"{time.strftime('%H:%M:%S')} job listener failed: {error}", flush=True)
 
 
 # Chain reads ----------------------------------------------------------------------------------------------

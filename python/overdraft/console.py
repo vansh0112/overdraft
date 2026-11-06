@@ -88,6 +88,7 @@ _cache_lock = threading.Lock()
 
 
 _refreshing: set[tuple] = set()
+_generation: dict[tuple, int] = {}  # bumped when a value is forgotten, so a refresh already running can't restore it
 
 
 def cached(fn):
@@ -106,16 +107,21 @@ def cached(fn):
             if refresh:
                 _refreshing.add(key)
         if hit is None:
+            generation = _generation.get(key, 0)
             value = fn(*args)
             with _cache_lock:
-                _cache[key] = (time.monotonic(), value)
+                if _generation.get(key, 0) == generation:
+                    _cache[key] = (time.monotonic(), value)
             return value
         if refresh:
+            generation = _generation.get(key, 0)
+
             def run() -> None:
                 try:
                     value = fn(*args)
                     with _cache_lock:
-                        _cache[key] = (time.monotonic(), value)
+                        if _generation.get(key, 0) == generation:
+                            _cache[key] = (time.monotonic(), value)
                 except Exception:  # keep serving the last good value; the next request retries
                     pass
                 finally:
@@ -124,6 +130,22 @@ def cached(fn):
             threading.Thread(target=run, daemon=True).start()
         return hit[1]
     return wrapper
+
+
+AGENT_READS = ("line", "activity", "bureau_history", "endpoint_status")
+SHARED_READS = ("agents", "refusal_records", "owner_view")
+
+
+def forget(agent_id: int) -> None:
+    """Drops what a finished enrolment or credit check just changed, so the next poll reads it fresh."""
+    with _cache_lock:
+        for key in list(_cache):
+            if key[0] in SHARED_READS or (key[0] in AGENT_READS and key[1:] == (agent_id,)):
+                _cache.pop(key, None)
+                _generation[key] = _generation.get(key, 0) + 1
+
+
+enrol.on_finished(forget)
 
 
 _hedera = None

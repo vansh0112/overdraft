@@ -350,7 +350,14 @@ python -m overdraft.watcher                   # breaches and overdue debts
 uvicorn overdraft.console:app --port 8000     # data for this site, enrolment and credit checks
 
 # a rush of paid jobs
-npm --prefix gateway run rush -- 8`}</Code>
+npm --prefix gateway run rush -- 8
+
+# try enrolment locally (ALLOW_LOCAL_ENDPOINTS=true): a second endpoint, served by a test agent
+# with its own budget, so tests never borrow on the demo agent's line
+AGENT_CREDIT_ID=0 AGENT_START_BALANCE_USD=50 uvicorn overdraft.agent.app:app --port 5002
+SPLITTER_CONTRACT_ID=0.0.INCOME_CONTRACT GATEWAY_PORT=4022 AGENT_INTERNAL_URL=http://localhost:5002 \\
+  npm --prefix gateway run gateway
+GATEWAY_URL=http://localhost:4022 npm --prefix gateway run rush -- 8`}</Code>
           </div>
 
           <div className="mt-12">
