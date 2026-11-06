@@ -4,6 +4,7 @@ import { atomic, pct, short, usd } from "@/lib/format";
 import { Card, ExtLink, Pill, SectionTitle, Skeleton } from "./ui";
 
 const KINDS: Record<string, string> = {
+  application: "Enrolled",
   underwriting: "Credit approved",
   refusal: "Credit refused",
   decision: "Limit set",
@@ -71,7 +72,7 @@ function Trail({ customer, owner }: { customer: Customer; owner: string }) {
 
 /** The underwriting decision behind a line: every fact it used, its memo, and the hash check against Hedera. */
 export function Underwriting({ records, line }: { records: BureauRecord[] | null; line: Line | null }) {
-  const decisions = (records ?? []).filter((r) => r.decision);
+  const decisions = (records ?? []).filter((r) => r.decision?.facts);
   const current = decisions.find((r) => line && r.decisionHash === line.decisionHash) ?? decisions[0];
   if (!records) {
     return (
@@ -83,7 +84,14 @@ export function Underwriting({ records, line }: { records: BureauRecord[] | null
   if (!current?.decision) {
     return (
       <Card>
-        <SectionTitle title="Underwriting" hint="This line's limit was set by hand for a test, so there is no underwriting decision to show." />
+        <SectionTitle
+          title="Underwriting"
+          hint={
+            line?.stage === "enrolled"
+              ? "No credit check yet. Once customers have paid the agent's income contract, its owner can ask for one."
+              : "This line's limit was set by hand for a test, so there is no underwriting decision to show."
+          }
+        />
         <div className="h-5" />
       </Card>
     );

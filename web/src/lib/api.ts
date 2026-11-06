@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export const API = (process.env.NEXT_PUBLIC_CONSOLE_API ?? "http://localhost:8000").replace(/\/$/, "");
 
@@ -19,6 +19,8 @@ export type Contracts = {
 
 export type Line = {
   agentId: number;
+  /** From the agent's ERC-8004 registration file, when it's stored on-chain. */
+  name: string | null;
   status: "active" | "defaulted";
   agent: string;
   owner: string;
@@ -31,6 +33,23 @@ export type Line = {
   decisionHash: string;
   collateral: { locked: boolean; heldBy: "creditLine" | "owner" | "treasury"; holder: string };
   loans: { id: number; amountUsd: number; zgTx: string | null }[];
+  stage: Stage;
+  /** Why the latest check refused it, when the stage is "refused". */
+  reason: string | null;
+  application: Application | null;
+};
+
+/** Where a line stands: enrolled lines have no credit until a check approves them. */
+export type Stage = "approved" | "enrolled" | "refused" | "no-credit" | "defaulted";
+
+/** What the owner enrolled the agent with (their signed application on Arkiv). */
+export type Application = {
+  endpoint: string;
+  incomeAccount: string | null;
+  aiCostPerJobUsd: number;
+  priceUsd: number;
+  enrolledAt: number;
+  arkivKey: string;
 };
 
 export type AgentEvent = { at: number; kind: string; detail: string; url: string | null; requestId?: string; teeVerified?: boolean };
@@ -55,7 +74,9 @@ export type Overview = { contracts: Contracts; agent: AgentStatus | null; line: 
 
 export type AgentSummary = {
   agentId: number;
+  name?: string | null;
   status: "active" | "defaulted" | "refused";
+  stage?: Stage;
   limitUsd?: number;
   owedUsd?: number;
   availableUsd?: number;
@@ -140,9 +161,67 @@ export type BureauRecord = {
   zgTx?: string;
   hederaTx?: string;
   decision?: { facts: Facts; memo: string; memoAuthor: string };
+  application?: { endpoint: string; owner: string; splitterId: string; enrolledAt: number };
   hashMatches?: boolean;
   decisionHash?: string;
 };
+
+export type EnrolConfig = {
+  domain: { name: string; version: string; chainId: number; verifyingContract: `0x${string}` };
+  types: Record<"Enrol" | "CreditCheck", { name: string; type: string }[]>;
+  creditLine: `0x${string}`;
+  identityRegistry: `0x${string}`;
+  usdc: string;
+  network: string;
+  signatureTtlSeconds: number;
+  maxAiCostPerJob: number;
+  checkCooldownSeconds: number;
+  allowLocalEndpoints: boolean;
+  enrolSteps: string[];
+  checkSteps: string[];
+};
+
+/** What an owner still needs before enrolling. */
+export type Readiness = {
+  owner: string;
+  account: string | null;
+  hbar: number;
+  usdcReady: boolean;
+  collateralApproved: boolean;
+  agentId?: number;
+  exists?: boolean;
+  ownsId?: boolean;
+  enrolled?: boolean;
+  /** The agent wallet's Hedera account, when asked about one (null if it has none yet). */
+  agentAccount?: string | null;
+};
+
+export type Job<R> = {
+  kind: "enrol" | "check";
+  agentId: number;
+  state: "queued" | "running" | "done" | "failed";
+  error: string | null;
+  steps: { label: string; done: boolean }[];
+  result: R;
+  updatedAt: number;
+};
+
+export type EnrolResult = { splitterId: string; splitter: string; lineTx: string; fingerprint: string; arkivKey: string | null; warning?: string };
+
+export type CheckResult = {
+  approved: boolean;
+  limitUsd: number;
+  reasons: string[];
+  independentCustomers: number;
+  minIndependentCustomers: number;
+  verifiedIncomeUsd: number;
+  receivedUsd: number;
+  decisionHash: string;
+  arkivKey: string | null;
+  limitTx: string | null;
+};
+
+export type EndpointStatus = { endpoint: string; payTo: string[]; splitterId: string; paysSplitter: boolean; error: string | null };
 
 export type DemoRun = { name: string | null; running: boolean; output: string[]; startedAt: number | null; exitCode: number | null };
 
@@ -164,7 +243,11 @@ export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-/** Fetches `path` now and every `intervalMs` while the tab is visible. A null path pauses it. */
+export function postJson<T>(path: string, body: object): Promise<T> {
+  return getJson<T>(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+}
+
+/** Fetches `path` now and every `intervalMs` while the tab is visible. A null path pauses it; reload() fetches at once. */
 export function usePoll<T>(path: string | null, intervalMs: number) {
   // Results are kept with the path they belong to, so switching paths never shows the previous path's data.
   const [result, setResult] = useState<{ path: string | null; data: T | null; error: Error | null; updatedAt: number | null }>({
@@ -173,6 +256,7 @@ export function usePoll<T>(path: string | null, intervalMs: number) {
     error: null,
     updatedAt: null,
   });
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!path) return;
@@ -194,8 +278,9 @@ export function usePoll<T>(path: string | null, intervalMs: number) {
       stopped = true;
       clearTimeout(timer);
     };
-  }, [path, intervalMs]);
+  }, [path, intervalMs, nonce]);
 
   const current = path !== null && result.path === path ? result : null;
-  return { data: current?.data ?? null, error: current?.error ?? null, updatedAt: current?.updatedAt ?? null };
+  const reload = useCallback(() => setNonce((n) => n + 1), []);
+  return { data: current?.data ?? null, error: current?.error ?? null, updatedAt: current?.updatedAt ?? null, reload };
 }

@@ -2,12 +2,12 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { ArrowRight, CircleX, IdCard, LogOut } from "lucide-react";
+import { ArrowRight, CircleX, IdCard, LogOut, Plus } from "lucide-react";
 import { ApiError, usePoll, type Line, type OwnerView as Owner } from "@/lib/api";
 import { agentLabel } from "@/lib/agents";
 import { date, short, usd } from "@/lib/format";
 import { disconnectWallet, sameAddress, useWallet } from "@/lib/wallet";
-import { CollateralPill, UsageBar } from "../console/panels";
+import { CollateralPill, StagePill, UsageBar } from "../console/panels";
 import { Card, Crumbs, ExtLink, LiveDot, Pill, SectionTitle, Skeleton, Stat } from "../console/ui";
 
 function plural(count: number, noun: string): string {
@@ -23,10 +23,10 @@ function LineCard({ line }: { line: Line }) {
           <div className="font-serif text-[28px] leading-none text-paper">
             Agent <span className="italic">#{line.agentId}</span>
           </div>
-          <div className="mt-1.5 text-[13px] text-fog">{agentLabel(line.agentId)}</div>
+          <div className="mt-1.5 text-[13px] text-fog">{agentLabel(line.agentId, line.name)}</div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {defaulted ? <Pill tone="outline">Defaulted</Pill> : <Pill tone="quiet">Active</Pill>}
+          <StagePill stage={line.stage} />
           <CollateralPill heldBy={line.collateral.heldBy} />
         </div>
       </div>
@@ -44,7 +44,11 @@ function LineCard({ line }: { line: Line }) {
             ? "Closed after a default"
             : line.owedUsd > 0 && line.dueAt
               ? `Due ${date(line.dueAt)} · repaid from income`
-              : "Nothing owed"}
+              : line.stage === "enrolled"
+                ? "Waiting for a credit check"
+                : line.stage === "refused"
+                  ? "Refused at its last check"
+                  : "Nothing owed"}
           {` · ${line.loans.length} loan${line.loans.length === 1 ? "" : "s"}`}
         </span>
         <span className="inline-flex items-center gap-1 text-paper group-hover:underline">
@@ -55,7 +59,7 @@ function LineCard({ line }: { line: Line }) {
   );
 }
 
-function Empty({ owner }: { owner: Owner }) {
+function Empty({ owner, isYou }: { owner: Owner; isYou: boolean }) {
   return (
     <Card className="mt-8 p-6">
       <h2 className="font-serif text-[26px] leading-none text-paper">No agents here yet</h2>
@@ -72,9 +76,16 @@ function Empty({ owner }: { owner: Owner }) {
           creates its account.
         </p>
       )}
-      <Link href="/docs" className="mt-5 inline-flex items-center gap-1.5 text-[14px] text-paper underline-offset-4 hover:underline">
-        How credit works <ArrowRight size={14} aria-hidden="true" />
-      </Link>
+      <div className="mt-5 flex flex-wrap items-center gap-4">
+        {isYou && (
+          <Link href="/enrol" className="inline-flex items-center gap-2 rounded-xl bg-signal px-4 py-2.5 text-[14px] font-semibold text-ink transition hover:brightness-110">
+            <Plus size={15} aria-hidden="true" /> Enrol an agent
+          </Link>
+        )}
+        <Link href="/docs" className="inline-flex items-center gap-1.5 text-[14px] text-paper underline-offset-4 hover:underline">
+          How credit works <ArrowRight size={14} aria-hidden="true" />
+        </Link>
+      </div>
     </Card>
   );
 }
@@ -123,9 +134,14 @@ export function OwnerView({ owner }: { owner: string }) {
           )}
         </div>
         {isYou && (
-          <button onClick={disconnectWallet} className="inline-flex items-center gap-2 rounded-xl border border-ink-line px-3 py-2 text-[13px] text-fog transition hover:border-fog hover:text-paper">
-            <LogOut size={14} aria-hidden="true" /> Disconnect
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/enrol" className="inline-flex items-center gap-2 rounded-xl bg-signal px-3.5 py-2 text-[13px] font-semibold text-ink transition hover:brightness-110">
+              <Plus size={14} aria-hidden="true" /> Enrol an agent
+            </Link>
+            <button onClick={disconnectWallet} className="inline-flex items-center gap-2 rounded-xl border border-ink-line px-3 py-2 text-[13px] text-fog transition hover:border-fog hover:text-paper">
+              <LogOut size={14} aria-hidden="true" /> Disconnect
+            </button>
+          </div>
         )}
       </div>
 
@@ -149,12 +165,12 @@ export function OwnerView({ owner }: { owner: string }) {
         </div>
       )}
 
-      {data && data.agents.length + data.refused.length + data.unenrolled.length === 0 && <Empty owner={data} />}
+      {data && data.agents.length + data.refused.length + data.unenrolled.length === 0 && <Empty owner={data} isYou={isYou} />}
 
       {data && data.agents.length > 0 && (
         <>
           <Card className="mt-8 grid grid-cols-2 gap-6 p-5 lg:grid-cols-4">
-            <Stat label="Credit limit" value={usd(data.totals.limitUsd)} sub={plural(data.agents.filter((a) => a.status === "active").length, "active line")} />
+            <Stat label="Credit limit" value={usd(data.totals.limitUsd)} sub={plural(data.agents.filter((a) => a.stage === "approved").length, "line with credit")} />
             <Stat label="Owed" value={usd(data.totals.owedUsd)} sub="repaid automatically from income" accent={data.totals.owedUsd > 0} />
             <Stat label="Available to borrow" value={usd(data.totals.availableUsd)} sub="right now, across lines" />
             <Stat
@@ -202,9 +218,21 @@ export function OwnerView({ owner }: { owner: string }) {
           <SectionTitle title="Not enrolled" hint="Agent IDs this wallet registered that have no credit line and no credit decision yet." />
           <ul className="flex flex-wrap gap-2 p-5">
             {data.unenrolled.map((u) => (
-              <li key={u.agentId} className="inline-flex items-center gap-2 rounded-xl border border-ink-line px-3 py-2 text-[13px] text-paper">
-                <IdCard size={14} className="text-fog" aria-hidden="true" />
-                Agent #{u.agentId}
+              <li key={u.agentId}>
+                {isYou ? (
+                  <Link
+                    href={`/enrol?agent=${u.agentId}`}
+                    className="inline-flex items-center gap-2 rounded-xl border border-ink-line px-3 py-2 text-[13px] text-paper transition hover:border-fog"
+                  >
+                    <IdCard size={14} className="text-fog" aria-hidden="true" />
+                    Agent #{u.agentId} <span className="text-signal">Enrol →</span>
+                  </Link>
+                ) : (
+                  <span className="inline-flex items-center gap-2 rounded-xl border border-ink-line px-3 py-2 text-[13px] text-paper">
+                    <IdCard size={14} className="text-fog" aria-hidden="true" />
+                    Agent #{u.agentId}
+                  </span>
+                )}
               </li>
             ))}
           </ul>

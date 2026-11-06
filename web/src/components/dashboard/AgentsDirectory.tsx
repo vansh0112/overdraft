@@ -5,14 +5,9 @@ import { ArrowRight } from "lucide-react";
 import { usePoll, type AgentSummary } from "@/lib/api";
 import { agentLabel } from "@/lib/agents";
 import { short, usd } from "@/lib/format";
-import { CollateralPill } from "../console/panels";
-import { Card, LiveDot, Pill, Skeleton } from "../console/ui";
+import { CollateralPill, StagePill } from "../console/panels";
+import { Card, LiveDot, Skeleton } from "../console/ui";
 import { Lookup } from "./Lookup";
-
-function StatusPill({ status }: { status: AgentSummary["status"] }) {
-  if (status === "active") return <Pill tone="quiet">Active</Pill>;
-  return <Pill tone="outline">{status === "defaulted" ? "Defaulted" : "Refused"}</Pill>;
-}
 
 /** Every agent with a credit line or a credit decision. Anyone can check any agent. */
 export function AgentsDirectory() {
@@ -54,7 +49,7 @@ export function AgentsDirectory() {
               >
                 <Link href={`/agents/${a.agentId}`} className="col-span-2 min-w-0 lg:col-span-1">
                   <div className="font-semibold text-paper">Agent #{a.agentId}</div>
-                  <div className="text-[12.5px] text-fog">{agentLabel(a.agentId)}</div>
+                  <div className="text-[12.5px] text-fog">{agentLabel(a.agentId, a.name)}</div>
                 </Link>
                 <div className="min-w-0 text-[13px]">
                   <span className="text-[11px] text-fog lg:hidden">Owner </span>
@@ -75,7 +70,7 @@ export function AgentsDirectory() {
                   {a.status === "refused" ? "–" : usd(a.owedUsd)}
                 </div>
                 <div className="col-span-2 flex flex-wrap gap-2 lg:col-span-1">
-                  <StatusPill status={a.status} />
+                  <StagePill stage={a.stage ?? (a.status === "active" ? "approved" : a.status)} />
                   {a.collateral && <CollateralPill heldBy={a.collateral.heldBy} />}
                 </div>
                 <Link

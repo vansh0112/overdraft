@@ -6,6 +6,7 @@ export const AGENT_LABELS: Record<number, string> = {
   143: "Payment redirect test",
 };
 
-export function agentLabel(agentId: number): string {
-  return AGENT_LABELS[agentId] ?? "Agent";
+/** The demo agents' short names, else the name in the agent's ERC-8004 registration, else "Agent". */
+export function agentLabel(agentId: number, name?: string | null): string {
+  return AGENT_LABELS[agentId] ?? name ?? "Agent";
 }

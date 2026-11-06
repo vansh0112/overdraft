@@ -51,6 +51,9 @@ export function OwnerHome() {
               </button>
             )}
             {wallet.error && <p className="mt-3 text-[13px] text-signal">{wallet.error}</p>}
+            <Link href="/enrol" className="mt-4 flex w-fit items-center gap-1.5 text-[14px] text-paper underline-offset-4 hover:underline">
+              New here? Enrol an agent <ArrowRight size={14} aria-hidden="true" />
+            </Link>
           </div>
         </Card>
 

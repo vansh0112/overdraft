@@ -12,6 +12,7 @@ import { Bureau, Underwriting } from "../console/Bureau";
 import { DemoControls } from "../console/DemoControls";
 import { ComputeCard, CreditLineCard, Loop, VaultComputeCard } from "../console/panels";
 import { Card, Crumbs, ExtLink, LiveDot, Pill, Skeleton } from "../console/ui";
+import { OwnerActions } from "../enrol/OwnerActions";
 
 /** The owner's EVM address: lines carry it directly, refusals carry it next to the owner's Hedera account. */
 function ownerAddress(summary: AgentSummary | undefined): string | undefined {
@@ -78,7 +79,7 @@ export function AgentDashboard({ agentId }: { agentId: number }) {
           </h1>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[14px] text-fog">
             <span>
-              {agentLabel(agentId)}
+              {agentLabel(agentId, line.data?.name ?? summary?.name)}
               {line.data ? ` · agent account ${short(line.data.agent)}` : ""}
             </span>
             {isOwner && <Pill tone="neutral">You own this agent</Pill>}
@@ -95,7 +96,7 @@ export function AgentDashboard({ agentId }: { agentId: number }) {
                 className="rounded-xl border border-ink-line px-3 py-2 text-left text-[12px] text-fog transition hover:border-fog hover:text-paper"
               >
                 <div className="font-semibold text-paper">#{a.agentId}</div>
-                <div className={a.status === "active" ? "" : "text-signal"}>{a.status}</div>
+                <div className={a.stage === "approved" || a.stage === "enrolled" ? "" : "text-signal"}>{a.stage ?? a.status}</div>
               </Link>
             ))}
           </nav>
@@ -133,8 +134,14 @@ export function AgentDashboard({ agentId }: { agentId: number }) {
         </div>
       )}
 
+      {isOwner && line.data?.application && line.data.stage !== "defaulted" && (
+        <div className="mt-8">
+          <OwnerActions line={line.data} />
+        </div>
+      )}
+
       {(hasLine || !ready) && (
-        <div className="mt-8 grid grid-cols-1 gap-4">
+        <div className={`${isOwner && line.data?.application ? "mt-4" : "mt-8"} grid grid-cols-1 gap-4`}>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
             {line.data ? (
               <CreditLineCard line={line.data} termSeconds={terms?.termSeconds} />

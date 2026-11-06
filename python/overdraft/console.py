@@ -10,6 +10,7 @@ CONSOLE_DEMO_PASSWORD in an x-demo-password header and run one at a time.
     uvicorn overdraft.console:app --port 8000
 """
 
+import base64
 import hmac
 import json
 import re
@@ -153,6 +154,30 @@ def contract_id(evm_address: str) -> str:
     return contract_id_of(evm_address)  # a contract's ID never changes
 
 
+_names: dict[int, str | None] = {}
+DATA_URI = "data:application/json;base64,"
+
+
+def agent_name(agent_id: int) -> str | None:
+    """The name in the agent's ERC-8004 registration file, when it's stored on-chain as a data URI.
+
+    Registration files at web addresses aren't fetched: the server doesn't follow URLs anyone can set.
+    """
+    if agent_id not in _names:
+        identity = hedera().eth.contract(address=Web3.to_checksum_address(IDENTITY_REGISTRY), abi=IDENTITY_ABI)
+        name = None
+        try:
+            uri = identity.functions.tokenURI(agent_id).call()
+            if uri.startswith(DATA_URI) and len(uri) < 4096:
+                parsed = json.loads(base64.b64decode(uri[len(DATA_URI):]))
+                if isinstance(parsed, dict) and isinstance(parsed.get("name"), str):
+                    name = " ".join(parsed["name"].split())[:60] or None
+        except Exception:  # an ID without a readable registration file just has no name
+            name = None
+        _names[agent_id] = name
+    return _names[agent_id]
+
+
 def usd(atomic: int) -> float:
     return round(atomic / USDC, 6)
 
@@ -199,6 +224,7 @@ def line(agent_id: int) -> dict:
              for name, a, _ in events if name == "DrawRequested" and a["agentId"] == agent_id]
     return {
         "agentId": agent_id,
+        "name": agent_name(agent_id),
         "status": STATUS[status],
         "agent": agent,
         "owner": owner,
@@ -277,8 +303,12 @@ def bureau_history(agent_id: int) -> list[dict]:
             record["hederaTx"] = hashscan_tx(attrs["hederaTx"])
         if "record" in attrs:
             raw = bytes.fromhex(attrs["record"].removeprefix("0x"))
-            decision = json.loads(raw)
-            record["decision"] = decision
+            parsed = json.loads(raw)
+            if attrs["kind"] == "application":  # what the owner signed, not an underwriting decision
+                record["application"] = {"endpoint": parsed["endpoint"], "owner": parsed["owner"], "splitterId": parsed["splitter"]["id"],
+                                         "enrolledAt": parsed["enrolledAt"]}
+            else:
+                record["decision"] = parsed
             record["hashMatches"] = Web3.keccak(raw).to_0x_hex() == attrs["decisionHash"]
             record["decisionHash"] = attrs["decisionHash"]
         records.append(record)
@@ -318,7 +348,8 @@ def activity(agent_id: int) -> list[dict]:
             continue
         at, url = log["timestamp"], hashscan_tx(log["transaction_hash"])
         if name == "LimitSet":
-            events.append(event(at, "limit", f"Credit limit set to ${usd(a['limit']):.2f}", url))
+            title = f"Credit limit set to ${usd(a['limit']):.2f}" if a["limit"] else "Limit set to $0: no credit until a check approves it"
+            events.append(event(at, "limit", title, url))
         elif name == "IdLocked":
             events.append(event(at, "locked", "Agent ID locked as collateral", url))
         elif name == "DrawRequested":
@@ -407,7 +438,7 @@ def contracts_info() -> dict:
 
 @app.get("/api/agents")
 def agents() -> list[dict]:
-    out = [{k: summary[k] for k in ("agentId", "status", "stage", "reason", "limitUsd", "owedUsd", "availableUsd", "collateral", "owner", "agent")}
+    out = [{k: summary[k] for k in ("agentId", "name", "status", "stage", "reason", "limitUsd", "owedUsd", "availableUsd", "collateral", "owner", "agent")}
            for summary in all_lines()]
     with_lines = {a["agentId"] for a in out}
     out += [r for r in refusals() if r["agentId"] not in with_lines]
@@ -598,9 +629,10 @@ def enrol_config() -> dict:
 
 
 @app.get("/api/enrol/readiness")
-def enrol_readiness(owner: str = Query(pattern=EVM_PATTERN), agentId: int | None = Query(default=None, ge=0)) -> dict:
+def enrol_readiness(owner: str = Query(pattern=EVM_PATTERN), agentId: int | None = Query(default=None, ge=0),
+                    agent: str | None = Query(default=None, pattern=EVM_PATTERN)) -> dict:
     readiness_checks.spend()
-    return enrol.readiness(owner, agentId)
+    return enrol.readiness(owner, agentId, agent)
 
 
 @app.post("/api/enrol", status_code=202)

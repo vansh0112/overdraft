@@ -62,6 +62,8 @@ IDENTITY_ABI = [
      "inputs": [{"name": "tokenId", "type": "uint256"}], "outputs": [{"name": "", "type": "address"}]},
     {"name": "ownerOf", "type": "function", "stateMutability": "view",
      "inputs": [{"name": "tokenId", "type": "uint256"}], "outputs": [{"name": "", "type": "address"}]},
+    {"name": "tokenURI", "type": "function", "stateMutability": "view",
+     "inputs": [{"name": "tokenId", "type": "uint256"}], "outputs": [{"name": "", "type": "string"}]},
     {"name": "Transfer", "type": "event", "anonymous": False, "inputs": [
         {"name": "from", "type": "address", "indexed": True}, {"name": "to", "type": "address", "indexed": True},
         {"name": "tokenId", "type": "uint256", "indexed": True}]},

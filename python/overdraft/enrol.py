@@ -295,9 +295,9 @@ def _usdc_ready(body: dict) -> bool:
     return auto == -1 or auto > 0 or usdc_associated(body["account"])
 
 
-def readiness(owner: str, agent_id: int | None) -> dict:
+def readiness(owner: str, agent_id: int | None, agent: str | None = None) -> dict:
     """What an owner still needs before enrolling: a funded account that can take USDC, the collateral
-    approval, and (for one agent ID) owning it with no line yet."""
+    approval, and (for one agent ID) owning it with no line yet. With `agent`, also that wallet's account."""
     owner = Web3.to_checksum_address(owner)
     _, credit_line, identity = _contracts()
     body = _mirror_account(owner)
@@ -316,6 +316,8 @@ def readiness(owner: str, agent_id: int | None) -> dict:
         status = credit_line.functions.lines(agent_id).call()[-1]
         out.update(agentId=agent_id, exists=holder is not None, ownsId=bool(holder) and holder.lower() == owner.lower(),
                    enrolled=status != 0)
+    if agent:
+        out["agentAccount"] = account_or_none(Web3.to_checksum_address(agent))
     return out
 
 

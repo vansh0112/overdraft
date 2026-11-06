@@ -1,0 +1,32 @@
+import { Check, CircleX, LoaderCircle } from "lucide-react";
+import type { Job } from "@/lib/api";
+
+/** The steps of an enrolment or credit check as the server works through them. */
+export function JobProgress<R>({ job }: { job: Job<R> }) {
+  const current = job.steps.findIndex((s) => !s.done);
+  return (
+    <div>
+      <ol className="space-y-2.5">
+        {job.steps.map((step, i) => {
+          const active = job.state === "running" && i === current;
+          const failed = job.state === "failed" && i === current;
+          return (
+            <li key={step.label} className="flex items-center gap-2.5 text-[14px]">
+              <span
+                className={`grid h-5 w-5 shrink-0 place-items-center rounded-full ${
+                  step.done ? "bg-signal text-ink" : failed ? "text-signal" : "border border-ink-line text-fog"
+                }`}
+                aria-hidden="true"
+              >
+                {step.done ? <Check size={12} strokeWidth={3} /> : failed ? <CircleX size={18} /> : active ? <LoaderCircle size={12} className="animate-spin" /> : null}
+              </span>
+              <span className={step.done ? "text-paper" : active ? "text-paper" : "text-fog"}>{step.label}</span>
+            </li>
+          );
+        })}
+      </ol>
+      {job.state === "queued" && <p className="mt-3 text-[13px] text-fog">Waiting for the previous request to finish…</p>}
+      {job.state === "failed" && job.error && <p className="mt-3 text-[13px] text-signal">{job.error}</p>}
+    </div>
+  );
+}

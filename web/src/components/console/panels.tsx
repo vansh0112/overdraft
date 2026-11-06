@@ -3,6 +3,20 @@ import type { ActivityEvent, AgentStatus, Compute, Contracts, Line } from "@/lib
 import { ago, date, short, usd } from "@/lib/format";
 import { Card, ExtLink, Pill, Stat } from "./ui";
 
+const STAGES: Record<Line["stage"], { label: string; tone: "quiet" | "outline" | "neutral" }> = {
+  approved: { label: "Active", tone: "quiet" },
+  enrolled: { label: "Enrolled · no credit yet", tone: "neutral" },
+  refused: { label: "Refused", tone: "outline" },
+  "no-credit": { label: "No credit", tone: "quiet" },
+  defaulted: { label: "Defaulted", tone: "outline" },
+};
+
+/** Where a line stands, for any agent summary that carries a stage. */
+export function StagePill({ stage }: { stage: Line["stage"] }) {
+  const { label, tone } = STAGES[stage] ?? STAGES["no-credit"];
+  return <Pill tone={tone}>{label}</Pill>;
+}
+
 /** Where the agent's ERC-8004 ID is: locked while it owes, back with its owner, or kept after a default. */
 export function CollateralPill({ heldBy }: { heldBy: Line["collateral"]["heldBy"] }) {
   const collateral = {
@@ -38,12 +52,12 @@ export function CreditLineCard({ line, termSeconds }: { line: Line; termSeconds?
           <ExtLink href={line.splitter.url}>repays through splitter {line.splitter.id}</ExtLink>
         </div>
         <div className="flex gap-2">
-          {defaulted ? <Pill tone="outline">Defaulted</Pill> : <Pill tone="quiet">Active</Pill>}
+          <StagePill stage={line.stage} />
           <CollateralPill heldBy={line.collateral.heldBy} />
         </div>
       </div>
       <div className="mt-5 grid grid-cols-3 gap-4">
-        <Stat label="Limit" value={usd(line.limitUsd)} sub="set from verified income" />
+        <Stat label="Limit" value={usd(line.limitUsd)} sub={line.stage === "approved" ? "set from verified income" : "after a credit check approves it"} />
         <Stat label="Owed" value={usd(line.owedUsd)} sub={`includes the ${termSeconds ? "flat " : ""}5% fee`} accent={line.owedUsd > 0} />
         <Stat label="Available" value={usd(line.availableUsd)} sub={defaulted ? "closed after default" : "to borrow now"} />
       </div>
@@ -56,7 +70,11 @@ export function CreditLineCard({ line, termSeconds }: { line: Line; termSeconds?
             ? "Defaulted: the lender kept the ID and closed the line"
             : line.owedUsd > 0 && line.dueAt
               ? `Due ${date(line.dueAt)} · repaid automatically from income`
-              : "Nothing owed"}
+              : line.stage === "enrolled"
+                ? "Enrolled: waiting for its first credit check"
+                : line.stage === "refused" && line.reason
+                  ? `Refused: ${line.reason}`
+                  : "Nothing owed"}
         </span>
         <span className="font-mono">{line.loans.length} loan{line.loans.length === 1 ? "" : "s"} on this line</span>
       </div>
@@ -199,7 +217,7 @@ export function Loop({
     {
       title: "Loan repays itself",
       where: "debt on the splitter",
-      value: line.status === "defaulted" ? "Defaulted" : line.owedUsd === 0 ? "Repaid" : `${usd(line.owedUsd)} left`,
+      value: line.status === "defaulted" ? "Defaulted" : line.loans.length === 0 ? "No loans yet" : line.owedUsd === 0 ? "Repaid" : `${usd(line.owedUsd)} left`,
       detail:
         line.status === "defaulted"
           ? `${usd(line.owedUsd)} unpaid · the lender kept the ID`
@@ -207,7 +225,7 @@ export function Loop({
             ? `ID returned to its owner ${ago(released.at)}`
             : "each split pays the lender first, then the ID is returned",
       url: line.owedUsd === 0 ? released?.url : undefined,
-      done: line.status === "active" && line.owedUsd === 0,
+      done: line.status === "active" && line.loans.length > 0 && line.owedUsd === 0,
     },
   ];
 
