@@ -40,6 +40,7 @@ from .solidity import load_abi
 USDC = 1_000_000
 X402_FEE_PAYERS = {"0.0.9185802"}  # the x402.org facilitator pays the fees of x402 payments on Hedera testnet
 CACHE_SECONDS = float(optional("CONSOLE_CACHE_SECONDS") or 5)
+STALE_LIMIT_SECONDS = 60
 DEMO_PASSWORD = optional("CONSOLE_DEMO_PASSWORD") or ""
 ORIGINS = [o.strip() for o in (optional("CONSOLE_ALLOWED_ORIGINS") or "http://localhost:3000").split(",") if o.strip()]
 ACCOUNT_ID = re.compile(r"0\.0\.\d{1,12}")
@@ -97,8 +98,9 @@ def cached(fn=None, *, seconds: float | None = None):
     """Keeps each result for a few seconds (`seconds`, else CACHE_SECONDS), so polling doesn't flood the nodes.
 
     After that the last result is still served at once while a fresh one is fetched in the background,
-    so only the very first request for a value waits for the chains. If a fetch fails because a public
-    node is busy, the last good result is served rather than an error.
+    so only the very first request for a value waits for the chains. A result left unasked for over a
+    minute is fetched afresh instead, so a first visit after a quiet spell doesn't show old numbers. If a
+    fetch fails because a public node is busy, the last good result is served rather than an error.
     """
     if fn is None:
         return lambda f: cached(f, seconds=seconds)
@@ -107,8 +109,11 @@ def cached(fn=None, *, seconds: float | None = None):
     @wraps(fn)
     def wrapper(*args):
         key = (fn.__name__, *args)
+        too_old = max(STALE_LIMIT_SECONDS, max_age * 3)
         with _cache_lock:
             hit = _cache.get(key)
+            if hit is not None and time.monotonic() - hit[0] >= too_old:
+                hit = None  # too old to show even briefly: fetch it now (the last good value still covers a busy node)
             stale = hit is not None and time.monotonic() - hit[0] >= max_age
             refresh = stale and key not in _refreshing
             if refresh:
@@ -119,7 +124,7 @@ def cached(fn=None, *, seconds: float | None = None):
             with lock:
                 with _cache_lock:
                     hit = _cache.get(key)
-                if hit is not None:  # fetched by a caller that got here first
+                if hit is not None and time.monotonic() - hit[0] < too_old:  # fetched by a caller that got here first
                     return hit[1]
                 generation = _generation.get(key, 0)
                 try:

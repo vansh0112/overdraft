@@ -144,7 +144,7 @@ export function VaultComputeCard({ compute }: { compute: Extract<Compute, { sour
   );
 }
 
-type Step = { title: string; where: string; value: string; detail: string; url?: string; done: boolean };
+type Step = { title: string; where: string; value: string; detail: string; url?: string; urlLabel?: string; done: boolean };
 
 /**
  * The six real steps of one loan cycle, each showing its latest on-chain event. `reportsJobs` is true for an agent
@@ -211,6 +211,7 @@ export function Loop({
             ? "the relay deposits each loan on 0G"
             : "a dry run on 0G's live PaymentVault; no 0G is spent",
       url: deposit?.url,
+      urlLabel: deposit?.simulated ? "PaymentVault" : undefined,
       done: Boolean(deposit),
     },
     {
@@ -256,7 +257,7 @@ export function Loop({
           <div className="mt-1 text-[12px] leading-snug text-fog">{step.detail}</div>
           {step.url && (
             <div className="mt-auto pt-3 text-[12px]">
-              <ExtLink href={step.url}>transaction</ExtLink>
+              <ExtLink href={step.url}>{step.urlLabel ?? "transaction"}</ExtLink>
             </div>
           )}
         </li>
