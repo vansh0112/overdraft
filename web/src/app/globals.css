@@ -92,6 +92,11 @@ body {
   outline-offset: 2px;
   border-radius: 6px;
 }
+/* Text fields show focus with their caret and their own border instead. */
+input:not([type="checkbox"], [type="radio"]):focus-visible,
+textarea:focus-visible {
+  outline: none;
+}
 
 .tabular {
   font-variant-numeric: tabular-nums;

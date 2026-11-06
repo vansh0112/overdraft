@@ -61,9 +61,18 @@ function onAccounts(value: unknown) {
 
 /** A wallet or viem error in plain words. */
 export function walletError(error: unknown): string {
-  const { code, shortMessage, message, cause } = (error ?? {}) as { code?: number; shortMessage?: string; message?: string; cause?: { code?: number } };
-  if (code === 4001 || cause?.code === 4001) return "You declined the request in your wallet.";
-  if (code === -32002) return "Your wallet already has a request waiting. Open it to continue.";
+  const { shortMessage, message } = (error ?? {}) as { shortMessage?: string; message?: string };
+  // Wallet libraries wrap the wallet's own error a few levels deep; the code that matters can be on any of them.
+  const codes: number[] = [];
+  for (let e = error as { code?: number; cause?: unknown } | undefined, depth = 0; e && depth < 6; e = e.cause as typeof e, depth++) {
+    if (typeof e.code === "number") codes.push(e.code);
+  }
+  if (codes.includes(4001)) return "You declined the request in your wallet.";
+  if (codes.includes(-32002)) return "Your wallet already has a request waiting. Open it to continue.";
+  // The wallet couldn't reach its Hedera RPC (a dropped connection or a busy node): nothing was sent.
+  if (/failed to fetch|fetch failed|network ?error|timed? ?out/i.test(`${message ?? ""} ${shortMessage ?? ""}`)) {
+    return "Your wallet couldn't reach the Hedera network just now, so nothing was sent. Try again in a few seconds.";
+  }
   return shortMessage ?? message ?? "Couldn't reach the wallet.";
 }
 
