@@ -31,7 +31,11 @@ app.use(
         mimeType: "application/json",
       },
     },
-    new x402ResourceServer(facilitator).register(network, new ExactHederaScheme()),
+    new x402ResourceServer(facilitator)
+      .register(network, new ExactHederaScheme())
+      .onSettleFailure(async ({ error }) => {
+        console.error(`${new Date().toISOString()} settlement failed: ${error.message}`);
+      }),
   ),
 );
 

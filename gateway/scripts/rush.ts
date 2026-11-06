@@ -27,7 +27,7 @@ const results = await Promise.all(
   Array.from({ length: jobs }, async (_, i) => {
     await new Promise((resolve) => setTimeout(resolve, i * staggerMs));
     const result = await payers[i % payers.length].post(url, { text: `Rush job ${i + 1}: please translate this order note.`, to: "hi" }, priceUsd);
-    const link = result.transaction ? hashscanTx(result.transaction) : result.error ?? "";
+    const link = result.transaction ? hashscanTx(result.transaction) : result.error ?? JSON.stringify(result.body ?? "");
     console.log(`#${String(i + 1).padStart(2)} ${result.payer} HTTP ${result.status} ${result.settled ? "settled" : "not charged"} ${result.ms}ms ${link}`);
     return result;
   }),

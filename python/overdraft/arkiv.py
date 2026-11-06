@@ -6,6 +6,7 @@ We use the API directly because Arkiv's Python SDK predates the Rabdi testnet.
 """
 
 import os
+import time
 from dataclasses import dataclass
 
 import requests
@@ -157,7 +158,11 @@ def balance(address: str) -> int:
 
 
 def _rpc(method: str, params: list):
-    response = requests.post(rpc_url(), json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params}, timeout=60)
+    for attempt in range(5):
+        response = requests.post(rpc_url(), json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params}, timeout=60)
+        if response.status_code not in (429, 502, 503, 504):
+            break
+        time.sleep(1.5 * (attempt + 1))  # rate limited or briefly unavailable: back off and retry
     response.raise_for_status()
     body = response.json()
     if "error" in body:
