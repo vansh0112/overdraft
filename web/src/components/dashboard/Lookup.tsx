@@ -20,12 +20,12 @@ export function Lookup() {
 
   return (
     <form onSubmit={open} role="search">
-      <label htmlFor="lookup" className="text-[13px] text-fog">
+      <label htmlFor="lookup" className="text-[13px] text-muted">
         Look up any agent or owner
       </label>
       <div className="mt-2 flex flex-wrap gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-ink-line bg-ink px-3 py-2.5 focus-within:border-fog">
-          <Search size={15} className="shrink-0 text-fog" aria-hidden="true" />
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-line bg-canvas px-3 py-2.5 focus-within:border-muted">
+          <Search size={15} className="shrink-0 text-muted" aria-hidden="true" />
           <input
             id="lookup"
             value={value}
@@ -36,14 +36,14 @@ export function Lookup() {
             placeholder="140, 0x… or 0.0.…"
             autoComplete="off"
             spellCheck={false}
-            className="w-full min-w-0 bg-transparent font-mono text-[14px] text-paper outline-none placeholder:text-fog"
+            className="w-full min-w-0 bg-transparent font-mono text-[14px] text-fg outline-none placeholder:text-muted"
           />
         </div>
-        <button type="submit" className="rounded-xl bg-paper px-4 py-2.5 text-[14px] font-semibold text-ink transition hover:bg-paper-2">
+        <button type="submit" className="rounded-xl bg-fg px-4 py-2.5 text-[14px] font-semibold text-canvas transition hover:opacity-85">
           Open
         </button>
       </div>
-      {error && <p className="mt-2 text-[13px] text-signal">{error}</p>}
+      {error && <p className="mt-2 text-[13px] text-accent">{error}</p>}
     </form>
   );
 }

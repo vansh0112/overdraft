@@ -12,9 +12,9 @@ export function WalletButton() {
     return (
       <Link
         href="/dashboard"
-        className="hidden items-center gap-2 rounded-xl border border-ink-line px-3 py-1.5 font-mono text-[12.5px] text-paper transition hover:border-fog sm:inline-flex"
+        className="hidden items-center gap-2 rounded-xl border border-line px-3 py-1.5 font-mono text-[12.5px] text-fg transition hover:border-muted sm:inline-flex"
       >
-        <span className="h-1.5 w-1.5 rounded-full bg-signal" aria-hidden="true" />
+        <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
         {short(wallet.address)}
       </Link>
     );
@@ -24,7 +24,7 @@ export function WalletButton() {
     <button
       onClick={connectWallet}
       disabled={wallet.status === "connecting"}
-      className="hidden items-center gap-2 rounded-xl border border-ink-line px-3 py-1.5 text-[13px] font-semibold text-paper transition hover:border-fog disabled:opacity-50 sm:inline-flex"
+      className="hidden items-center gap-2 rounded-xl border border-line px-3 py-1.5 text-[13px] font-semibold text-fg transition hover:border-muted disabled:opacity-50 sm:inline-flex"
     >
       <Wallet size={14} aria-hidden="true" />
       {wallet.status === "connecting" ? "Connecting…" : "Connect wallet"}

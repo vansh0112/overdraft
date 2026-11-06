@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Footer, Nav } from "@/components/brand";
+import { DocsNav } from "@/components/DocsNav";
 import { DEPLOYMENTS, hashscan } from "@/lib/deployments";
 
 export const metadata: Metadata = {
@@ -24,34 +25,34 @@ const sections = [
 
 function H2({ id, children }: { id: string; children: React.ReactNode }) {
   return (
-    <h2 id={id} className="scroll-mt-24 font-serif text-[38px] leading-tight">
+    <h2 id={id} className="display scroll-mt-24 text-[30px] sm:text-[36px]">
       {children}
     </h2>
   );
 }
 
 function P({ children }: { children: React.ReactNode }) {
-  return <p className="mt-4 text-[16px] leading-[1.7] text-slate">{children}</p>;
+  return <p className="mt-4 text-[16px] leading-[1.7] text-muted">{children}</p>;
 }
 
 function Code({ children }: { children: string }) {
-  return <pre className="mt-4 overflow-x-auto rounded-xl bg-ink p-4 font-mono text-[13px] leading-relaxed text-paper">{children}</pre>;
+  return <pre className="mt-4 overflow-x-auto rounded-xl border border-line bg-surface p-4 font-mono text-[13px] leading-relaxed text-fg">{children}</pre>;
 }
 
 function C({ children }: { children: React.ReactNode }) {
-  return <code className="rounded bg-paper-2 px-1.5 py-0.5 font-mono text-[13.5px] text-ink">{children}</code>;
+  return <code className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[13.5px] text-fg">{children}</code>;
 }
 
 function Table({ head, rows }: { head: string[]; rows: React.ReactNode[][] }) {
   return (
-    <div className="mt-5 overflow-x-auto rounded-xl border border-paper-line">
+    <div className="mt-5 overflow-x-auto rounded-xl border border-line">
       <table className="w-full min-w-[560px] text-left text-[14px]">
-        <thead className="bg-paper-2 text-[12.5px] text-slate">
+        <thead className="bg-surface-2 font-mono text-[10.5px] uppercase tracking-[0.12em] text-faint">
           <tr>{head.map((h) => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}</tr>
         </thead>
-        <tbody className="divide-y divide-paper-line">
+        <tbody className="divide-y divide-line">
           {rows.map((row, i) => (
-            <tr key={i}>{row.map((cell, j) => <td key={j} className="px-4 py-2.5 align-top text-ink">{cell}</td>)}</tr>
+            <tr key={i}>{row.map((cell, j) => <td key={j} className="px-4 py-2.5 align-top text-fg">{cell}</td>)}</tr>
           ))}
         </tbody>
       </table>
@@ -60,7 +61,7 @@ function Table({ head, rows }: { head: string[]; rows: React.ReactNode[][] }) {
 }
 
 const A = ({ href, children }: { href: string; children: React.ReactNode }) => (
-  <a href={href} target="_blank" rel="noreferrer" className="font-mono text-[13.5px] text-ink underline decoration-paper-line underline-offset-4 hover:decoration-ink">
+  <a href={href} target="_blank" rel="noreferrer" className="font-mono text-[13.5px] text-fg underline decoration-line underline-offset-4 hover:decoration-fg">
     {children}
   </a>
 );
@@ -68,25 +69,16 @@ const A = ({ href, children }: { href: string; children: React.ReactNode }) => (
 export default function Docs() {
   const d = DEPLOYMENTS;
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-paper text-ink">
-      <Nav surface="paper" />
+    <div className="flex min-h-full flex-1 flex-col bg-canvas text-fg">
+      <Nav />
       <main className="mx-auto grid w-full max-w-[1200px] flex-1 grid-cols-1 gap-12 px-4 py-14 sm:px-6 lg:grid-cols-[220px_minmax(0,1fr)]">
         <aside className="hidden lg:block">
-          <nav className="sticky top-8 text-[14px]" aria-label="Docs sections">
-            <div className="font-mono text-[11px] uppercase tracking-[0.1em] text-slate">Docs</div>
-            <ul className="mt-4 space-y-2.5">
-              {sections.map(([id, label]) => (
-                <li key={id}>
-                  <a href={`#${id}`} className="text-slate transition hover:text-ink">{label}</a>
-                </li>
-              ))}
-            </ul>
-          </nav>
+          <DocsNav sections={sections} />
         </aside>
 
         <article className="min-w-0 max-w-[760px]">
-          <div className="font-mono text-[12px] uppercase tracking-[0.1em] text-slate">Documentation</div>
-          <h1 className="mt-4 font-serif text-[56px] leading-none">How Overdraft works</h1>
+          <div className="font-mono text-[12px] uppercase tracking-[0.1em] text-muted">Documentation</div>
+          <h1 className="display mt-4 text-[44px] sm:text-[60px]">How Overdraft works</h1>
 
           <div className="mt-12">
             <H2 id="overview">Overview</H2>
@@ -96,9 +88,9 @@ export default function Docs() {
               compute, serves every job, and repays from the income those jobs bring in.
             </P>
             <P>
-              Three networks do one job each. <strong className="text-ink">Hedera</strong> carries the money: customers pay with x402 in
-              USDC, and the credit line and income splitter are contracts there. <strong className="text-ink">0G</strong> is where loans land,
-              in the agent&apos;s compute account, where they can only be spent on inference. <strong className="text-ink">Arkiv</strong> holds
+              Three networks do one job each. <strong className="text-fg">Hedera</strong> carries the money: customers pay with x402 in
+              USDC, and the credit line and income splitter are contracts there. <strong className="text-fg">0G</strong> is where loans land,
+              in the agent&apos;s compute account, where they can only be spent on inference. <strong className="text-fg">Arkiv</strong> holds
               the public credit history.
             </P>
           </div>
@@ -126,9 +118,9 @@ export default function Docs() {
             <H2 id="enrol">Enrol an agent</H2>
             <P>
               Any agent that sells its work over x402 in USDC on Hedera testnet can apply. Its owner enrols it on the{" "}
-              <Link href="/enrol" className="text-ink underline decoration-paper-line underline-offset-4 hover:decoration-ink">enrol page</Link> with a
+              <Link href="/enrol" className="text-fg underline decoration-line underline-offset-4 hover:decoration-fg">enrol page</Link> with a
               browser wallet such as MetaMask, holding a little test HBAR from the{" "}
-              <a href="https://portal.hedera.com/faucet" target="_blank" rel="noreferrer" className="text-ink underline decoration-paper-line underline-offset-4 hover:decoration-ink">
+              <a href="https://portal.hedera.com/faucet" target="_blank" rel="noreferrer" className="text-fg underline decoration-line underline-offset-4 hover:decoration-fg">
                 Hedera faucet
               </a>
               .
@@ -281,7 +273,7 @@ def borrow(agent_id: int, shortfall: int):
           <div className="mt-12">
             <H2 id="watcher">The watcher</H2>
             <P>For every line with debt outstanding, every minute:</P>
-            <ul className="mt-4 list-disc space-y-2 pl-5 text-[16px] leading-[1.7] text-slate">
+            <ul className="mt-4 list-disc space-y-2 pl-5 text-[16px] leading-[1.7] text-muted">
               <li>It asks the agent&apos;s paid endpoint for its price, like a customer would, and checks the x402 payTo is the agent&apos;s splitter. Two mismatches in a row are a breach.</li>
               <li>It watches 0G for <C>CreditTransferred</C> out of the agent&apos;s compute account, which would move borrowed compute out of reach.</li>
               <li>It marks debts overdue after the due date plus the grace period.</li>
@@ -362,7 +354,7 @@ GATEWAY_URL=http://localhost:4022 npm --prefix gateway run rush -- 8`}</Code>
 
           <div className="mt-12">
             <H2 id="limits">Limits and trust</H2>
-            <ul className="mt-4 list-disc space-y-2.5 pl-5 text-[16px] leading-[1.7] text-slate">
+            <ul className="mt-4 list-disc space-y-2.5 pl-5 text-[16px] leading-[1.7] text-muted">
               <li>The relay that moves loans from Hedera to 0G is run by the lender. Its deposits are capped per transfer and per day, and every one is recorded on Hedera.</li>
               <li>A payTo redirect is detected and punished, not prevented: an endpoint could show the watcher a different address than its customers.</li>
               <li>The money trail can&apos;t see through an exchange or more than three hops, which is why new agents start with small limits.</li>
@@ -376,7 +368,7 @@ GATEWAY_URL=http://localhost:4022 npm --prefix gateway run rush -- 8`}</Code>
           </div>
         </article>
       </main>
-      <Footer surface="paper" />
+      <Footer />
     </div>
   );
 }

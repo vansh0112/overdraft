@@ -1,202 +1,156 @@
 import Link from "next/link";
+import { ArrowRight, Check } from "lucide-react";
 import { Footer, Nav } from "@/components/brand";
-import { BudgetChart } from "@/components/landing/BudgetChart";
-import { LiveStrip } from "@/components/landing/LiveStrip";
+import { Guarantees } from "@/components/landing/Guarantees";
+import { HeroTerminal } from "@/components/landing/HeroTerminal";
+import { LiveBadge, NetworkStats } from "@/components/landing/Live";
+import { RushPipeline } from "@/components/landing/RushPipeline";
+import { Scramble } from "@/components/system/Scramble";
 import { DEPLOYMENTS } from "@/lib/deployments";
 
 const demo = `/agents/${DEPLOYMENTS.demoAgentId}`;
 
-const steps = [
-  {
-    title: "Prove your income",
-    where: "Hedera mirror node · Arkiv",
-    body: "Before lending, we trace where each customer's money came from, up to three hops back. Payments funded by the agent or its owner count for nothing. The limit and every fact behind it are published.",
-  },
-  {
-    title: "Borrow compute, not cash",
-    where: "0G compute",
-    body: "Loans are paid straight into the agent's 0G compute account. Money there can only be spent on AI, so a loan can't be cashed out and spent on something else. In this demo each deposit is a dry run against 0G's live PaymentVault.",
-  },
-  {
-    title: "Repay from income",
-    where: "x402 on Hedera",
-    body: "Customers pay per job with x402, into a contract that splits every payment. The lender is paid first, a share tops up compute, and the rest goes to the owner.",
-  },
-  {
-    title: "Your ID is the collateral",
-    where: "ERC-8004",
-    body: "The agent's on-chain identity is held while it owes and handed back when it repays. If it cheats or doesn't repay, the lender keeps it, along with the reputation attached to it.",
-  },
-];
+function SectionHead({ index, eyebrow, title, text }: { index: string; eyebrow: string; title: string; text: string }) {
+  return (
+    <div className="reveal grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)] md:items-end">
+      <div>
+        <div className="flex items-center gap-3 font-mono text-[11.5px] uppercase tracking-[0.14em] text-faint">
+          <span className="text-accent">{index}</span>
+          <span className="h-px w-8 bg-line-2" aria-hidden="true" />
+          {eyebrow}
+        </div>
+        <h2 className="display mt-4 text-[36px] sm:text-[52px]">{title}</h2>
+      </div>
+      <p className="max-w-md text-[15.5px] leading-relaxed text-muted md:justify-self-end">{text}</p>
+    </div>
+  );
+}
 
-const whyChain = [
-  {
-    title: "Money that can only become compute",
-    body: "0G's payment vault has no withdraw button for the agent. That's what makes lending to software safe: the loan can't leave as cash.",
-  },
-  {
-    title: "Repayment nobody can skip",
-    body: "Income arrives at a contract, not the agent's wallet. The contract pays the lender before anyone else, without asking the agent.",
-  },
-  {
-    title: "A credit history anyone can check",
-    body: "Every decision, loan and repayment is recorded on Arkiv, with a fingerprint on Hedera. Records delete themselves after 90 to 180 days, like an old entry on a credit report.",
-  },
-];
+/** The mark's dip-and-recover line, drawn huge and faint behind the hero. */
+function HeroCurve() {
+  return (
+    <svg viewBox="0 0 1600 640" preserveAspectRatio="xMidYMid slice" className="pointer-events-none absolute inset-0 hidden h-full w-full lg:block" aria-hidden="true">
+      <path
+        className="draw-path"
+        d="M-20 250 H 420 C 560 250, 600 470, 760 470 S 1000 150, 1160 150 H 1640"
+        fill="none"
+        stroke="var(--line-2)"
+        strokeWidth="1.5"
+        pathLength={1}
+        vectorEffect="non-scaling-stroke"
+      />
+      <circle cx="760" cy="470" r="5" fill="var(--accent)" className="draw-dot" />
+    </svg>
+  );
+}
+
+const ENROL_STEPS = ["Register the agent's ERC-8004 ID", "Approve the ID as collateral", "Sign the application with your wallet", "Pass a credit check on real income", "Borrow from code when work piles up"];
 
 export default function Home() {
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-paper text-ink">
-      <Nav surface="paper" />
+    <div className="flex min-h-full flex-1 flex-col bg-canvas text-fg">
+      <Nav />
       <main className="flex-1">
-        <section className="mx-auto grid max-w-[1200px] items-center gap-12 px-4 pb-16 pt-16 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:pt-24">
-          <div>
-            <div className="font-mono text-[12px] uppercase tracking-[0.1em] text-slate">Credit lines for AI agents</div>
-            <h1 className="mt-5 font-serif text-[56px] leading-[0.95] tracking-[-0.015em] sm:text-[76px]">
-              Never turn away <em className="text-signal">paid work.</em>
-            </h1>
-            <p className="mt-6 max-w-[520px] text-[18px] leading-relaxed text-slate">
-              When orders arrive faster than an agent&apos;s AI budget, Overdraft lends it compute on 0G. Its own earnings on Hedera pay the
-              loan back, automatically.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Link href={demo} className="rounded-xl bg-ink px-5 py-3 text-[15px] font-semibold text-paper transition hover:bg-ink-3">
-                See the live demo
-              </Link>
-              <a href="#how" className="rounded-xl border border-ink px-5 py-3 text-[15px] font-semibold text-ink transition hover:bg-paper-2">
-                How it works
-              </a>
-            </div>
-          </div>
-          <BudgetChart />
-        </section>
-
-        <section className="mx-auto max-w-[1200px] px-4 sm:px-6">
-          <LiveStrip />
-        </section>
-
-        <section className="mx-auto max-w-[1200px] px-4 py-20 sm:px-6">
-          <div className="grid gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-            <h2 className="font-serif text-[40px] leading-[1.02] sm:text-[48px]">A rush of orders shouldn&apos;t be a problem.</h2>
-            <div className="grid gap-6 text-[16px] leading-relaxed text-slate sm:grid-cols-3">
-              <p>
-                <span className="block font-semibold text-ink">Orders pile up.</span>A translation agent gets ten paid jobs in a minute
-                instead of one.
-              </p>
-              <p>
-                <span className="block font-semibold text-ink">The budget runs dry.</span>Each job needs AI compute, paid upfront. Its balance
-                covers two.
-              </p>
-              <p>
-                <span className="block font-semibold text-ink">Paid work is lost.</span>Without credit, it turns eight paying customers away.
-                With Overdraft, it borrows the gap and serves all ten.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section id="how" className="bg-ink text-paper">
-          <div className="mx-auto max-w-[1200px] px-4 py-20 sm:px-6">
-            <div className="font-mono text-[12px] uppercase tracking-[0.1em] text-fog">How it works</div>
-            <h2 className="mt-4 max-w-2xl font-serif text-[40px] leading-[1.02] sm:text-[48px]">Credit that runs itself, from limit to repayment.</h2>
-            <ol className="mt-12 grid gap-px overflow-hidden rounded-2xl border border-ink-line bg-ink-line md:grid-cols-2 lg:grid-cols-4">
-              {steps.map((s, i) => (
-                <li key={s.title} className="bg-ink-2 p-6">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-[12px] text-signal">0{i + 1}</span>
-                    <span className="text-[12px] text-fog">{s.where}</span>
-                  </div>
-                  <h3 className="mt-6 font-serif text-[26px] leading-tight">{s.title}</h3>
-                  <p className="mt-3 text-[14.5px] leading-relaxed text-fog">{s.body}</p>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </section>
-
-        <section className="mx-auto max-w-[1200px] px-4 py-20 sm:px-6">
-          <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <section className="relative overflow-hidden">
+          <div className="dots fade-edges pointer-events-none absolute inset-0" aria-hidden="true" />
+          <HeroCurve />
+          <div className="relative mx-auto grid max-w-[1240px] items-center gap-14 px-4 pb-20 pt-12 sm:px-6 sm:pt-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.02fr)] lg:gap-12 lg:pb-28 lg:pt-24">
             <div>
-              <div className="font-mono text-[12px] uppercase tracking-[0.1em] text-slate">Fake earnings don&apos;t count</div>
-              <h2 className="mt-4 font-serif text-[40px] leading-[1.02] sm:text-[48px]">We follow the money before we lend it.</h2>
-              <p className="mt-5 max-w-[520px] text-[16px] leading-relaxed text-slate">
-                An owner can fund a few wallets and have them &ldquo;pay&rdquo; their own agent, so it looks busy. Our underwriter traces each
-                customer&apos;s money back through the chain. When it leads to the owner, that income is ignored.
-              </p>
-              <p className="mt-4 max-w-[520px] text-[16px] leading-relaxed text-slate">
-                It raises the cost of faking rather than making it impossible, so new agents also start with small limits.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-paper-line bg-paper-2/60 p-6">
-              <div className="flex items-center justify-between text-[12px] text-slate">
-                <span className="font-mono uppercase tracking-[0.08em]">Agent #142 applies for credit</span>
-                <span className="rounded-full border border-signal px-2.5 py-1 font-semibold text-signal">Refused</span>
+              <div className="enter">
+                <LiveBadge />
               </div>
-              <ul className="mt-5 space-y-3 font-mono text-[13px]">
-                {[
-                  { from: "customer 0.0.11330357", trail: ["owner"], verdict: "funded by the owner" },
-                  { from: "customer 0.0.11330358", trail: ["owner"], verdict: "funded by the owner" },
-                  { from: "customer 0.0.11330359", trail: ["middleman", "owner"], verdict: "via a middleman" },
-                  { from: "customer 0.0.11324428", trail: [], verdict: "independent" },
-                ].map((row) => (
-                  <li key={row.from} className="flex flex-wrap items-center justify-between gap-2 border-b border-paper-line pb-3">
-                    <span>
-                      {row.from}
-                      {row.trail.map((t) => (
-                        <span key={t}>
-                          <span className="px-1.5 text-signal">←</span>
-                          <span className={t === "owner" ? "text-signal" : ""}>{t}</span>
-                        </span>
-                      ))}
+              <h1 className="display enter enter-1 mt-6 text-[44px] sm:text-[66px] lg:text-[74px]">
+                Credit for AI agents that never turn away <Scramble text="paid work." className="text-accent" />
+              </h1>
+              <p className="enter enter-2 mt-6 max-w-[520px] text-[17px] leading-relaxed text-muted">
+                When orders arrive faster than an agent&apos;s AI budget, Overdraft lends it the compute. What its customers pay repays the loan automatically, and its on-chain ID is the collateral.
+              </p>
+              <div className="enter enter-3 mt-8 flex flex-wrap gap-3">
+                <Link href={demo} className="group inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-fg px-5 sm:w-auto text-[15px] font-semibold text-canvas transition hover:opacity-90">
+                  Watch an agent borrow <ArrowRight size={16} className="transition group-hover:translate-x-0.5" aria-hidden="true" />
+                </Link>
+                <Link href="/enrol" className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-line-2 bg-surface/60 sm:w-auto px-5 text-[15px] font-semibold backdrop-blur transition hover:border-faint">
+                  Enrol your agent
+                </Link>
+              </div>
+              <div className="enter enter-4 mt-12 flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[12px] text-faint">
+                <span className="uppercase tracking-[0.14em]">Built on</span>
+                {["Hedera", "0G", "Arkiv", "ERC-8004", "x402"].map((n) => (
+                  <span key={n} className="text-muted">
+                    {n}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="enter enter-2">
+              <HeroTerminal />
+            </div>
+          </div>
+        </section>
+
+        <section id="how" className="border-t border-line">
+          <div className="mx-auto max-w-[1240px] px-4 py-20 sm:px-6 sm:py-28">
+            <SectionHead index="01" eyebrow="How it works" title="One rush, start to finish." text="A minute in the life of an agent with a credit line. The demo agent does this on testnet, and every step is a transaction you can open." />
+            <div className="reveal mt-12">
+              <RushPipeline />
+            </div>
+          </div>
+        </section>
+
+        <section id="safety" className="border-t border-line bg-canvas-2">
+          <div className="mx-auto max-w-[1240px] px-4 py-20 sm:px-6 sm:py-28">
+            <SectionHead index="02" eyebrow="Safe by construction" title="Lending to software, without trusting it." text="Three rules the contracts enforce, and one check before any credit is given. Nobody has to take the agent's word for anything." />
+            <div className="mt-12">
+              <Guarantees />
+            </div>
+          </div>
+        </section>
+
+        <section className="relative overflow-hidden border-t border-line">
+          <div className="dots fade-edges pointer-events-none absolute inset-0" aria-hidden="true" />
+          <div className="glow pointer-events-none absolute -right-40 top-10 h-[520px] w-[520px]" aria-hidden="true" />
+          <div className="relative mx-auto max-w-[1240px] px-4 py-20 sm:px-6 sm:py-28">
+            <div className="reveal">
+              <NetworkStats />
+            </div>
+            <div className="mt-16 grid items-center gap-12 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+              <div className="reveal">
+                <div className="flex items-center gap-3 font-mono text-[11.5px] uppercase tracking-[0.14em] text-faint">
+                  <span className="text-accent">03</span>
+                  <span className="h-px w-8 bg-line-2" aria-hidden="true" />
+                  Get started
+                </div>
+                <h2 className="display mt-4 text-[40px] sm:text-[60px]">Give your agent a credit line.</h2>
+                <p className="mt-5 max-w-md text-[16px] leading-relaxed text-muted">Any ERC-8004 agent on Hedera testnet can apply. No account to create: your wallet signs everything, and the agent borrows from a few lines of code.</p>
+                <div className="mt-8 flex flex-wrap gap-3">
+                  <Link href="/enrol" className="group inline-flex h-12 items-center gap-2 rounded-xl bg-accent px-5 text-[15px] font-semibold text-accent-ink transition hover:brightness-110">
+                    Enrol an agent <ArrowRight size={16} className="transition group-hover:translate-x-0.5" aria-hidden="true" />
+                  </Link>
+                  <Link href="/docs" className="inline-flex h-12 items-center rounded-xl border border-line-2 px-5 text-[15px] font-semibold transition hover:border-faint">
+                    Read the docs
+                  </Link>
+                </div>
+              </div>
+              <ol className="reveal overflow-hidden rounded-3xl border border-line bg-surface">
+                {ENROL_STEPS.map((step, i) => (
+                  <li key={step} className="group flex items-center gap-4 border-b border-line px-5 py-4 last:border-b-0 sm:px-6">
+                    <span className="font-mono text-[11px] text-faint">0{i + 1}</span>
+                    <span className="flex-1 text-[14.5px]">{step}</span>
+                    <span
+                      className="tick grid h-6 w-6 place-items-center rounded-full border border-line-2 text-faint"
+                      style={{ animationDelay: `${0.25 + i * 0.22}s` }}
+                      aria-hidden="true"
+                    >
+                      <Check size={13} />
                     </span>
-                    <span className={row.trail.length ? "text-signal" : "text-slate"}>{row.verdict}</span>
                   </li>
                 ))}
-              </ul>
-              <p className="mt-4 text-[14px] text-slate">
-                89% of its income came from its owner&apos;s own money. Only one real customer, so no credit. The refusal is public on Arkiv.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section className="border-t border-paper-line">
-          <div className="mx-auto max-w-[1200px] px-4 py-20 sm:px-6">
-            <div className="font-mono text-[12px] uppercase tracking-[0.1em] text-slate">Why this needs a blockchain</div>
-            <div className="mt-8 grid gap-8 md:grid-cols-3">
-              {whyChain.map((w) => (
-                <div key={w.title}>
-                  <h3 className="font-serif text-[28px] leading-tight">{w.title}</h3>
-                  <p className="mt-3 text-[15px] leading-relaxed text-slate">{w.body}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="mx-auto max-w-[1200px] px-4 pb-24 sm:px-6">
-          <div className="flex flex-col items-start justify-between gap-6 rounded-3xl bg-ink p-8 text-paper sm:p-12 lg:flex-row lg:items-end">
-            <div>
-              <h2 className="font-serif text-[40px] leading-none sm:text-[52px]">
-                Watch it <em className="text-signal">borrow and repay</em>, live.
-              </h2>
-              <p className="mt-4 max-w-xl text-[16px] text-fog">Every number on the dashboards is read from Hedera and Arkiv. 0G deposits are dry runs against 0G&apos;s live PaymentVault, so no 0G is spent. Every step links to its record.</p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <Link href={demo} className="rounded-xl bg-signal px-5 py-3 text-[15px] font-semibold text-ink transition hover:brightness-110">
-                Open the live demo
-              </Link>
-              <Link href="/dashboard" className="rounded-xl border border-ink-line px-5 py-3 text-[15px] font-semibold text-paper transition hover:border-fog">
-                Owner dashboard
-              </Link>
-              <Link href="/docs" className="rounded-xl border border-ink-line px-5 py-3 text-[15px] font-semibold text-paper transition hover:border-fog">
-                Read the docs
-              </Link>
+              </ol>
             </div>
           </div>
         </section>
       </main>
-      <Footer surface="paper" />
+      <Footer />
     </div>
   );
 }

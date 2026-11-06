@@ -1,68 +1,87 @@
 "use client";
 
-import { useState } from "react";
-import { Ban, CircleCheck, Coins, HandCoins, Lock, ShieldExclamationPoint, Split, SquarePen, Zap } from "lucide-react";
-import type { ActivityEvent, ActivityKind } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { ArrowUpRight } from "lucide-react";
+import type { ActivityEvent } from "@/lib/api";
 import { ago, usd } from "@/lib/format";
-import { Card, ExtLink, SectionTitle, Skeleton } from "./ui";
+import { EVENT_TAG, TONE_TEXT, eventAmount, eventLine } from "@/lib/events";
+import { LogPanel, type LogFilter } from "./LogPanel";
 
-const icons: Record<ActivityKind, React.ReactNode> = {
-  payment: <Coins size={15} />,
-  loan: <HandCoins size={15} />,
-  deposit: <Zap size={15} />,
-  split: <Split size={15} />,
-  released: <CircleCheck size={15} />,
-  locked: <Lock size={15} />,
-  limit: <SquarePen size={15} />,
-  breach: <ShieldExclamationPoint size={15} />,
-  default: <Ban size={15} />,
-};
-
-const highlighted: ActivityKind[] = ["loan", "deposit", "breach", "default"];
-
-function detail(e: ActivityEvent): string | null {
-  switch (e.kind) {
-    case "payment":
-      return e.payer ? `from ${e.payer}` : null;
-    case "loan":
-      return `owed ${usd(e.owedAfterUsd)} after this loan`;
-    case "split":
-      return `lender ${usd(e.toLenderUsd)} · compute ${usd(e.toComputeUsd)} · owner ${usd(e.toOwnerUsd)} · owed ${usd(e.owedAfterUsd)} after`;
-    default:
-      return null;
-  }
+function key(e: ActivityEvent) {
+  return `${e.kind}-${e.at}-${e.url}`;
 }
 
+const FILTERS: LogFilter<ActivityEvent>[] = [
+  { id: "all", label: "All", match: () => true },
+  { id: "payments", label: "Payments", match: (e) => e.kind === "payment" },
+  { id: "loans", label: "Loans", match: (e) => e.kind === "loan" || e.kind === "locked" || e.kind === "limit" },
+  { id: "compute", label: "Into 0G", match: (e) => e.kind === "deposit" },
+  { id: "repayments", label: "Repayments", match: (e) => e.kind === "split" || e.kind === "released" },
+  { id: "problems", label: "Breaches and defaults", match: (e) => e.kind === "breach" || e.kind === "default" },
+];
+
+const GRID = "grid-cols-[56px_minmax(0,1fr)_auto] sm:grid-cols-[72px_64px_minmax(0,1fr)_auto]";
+
+/** Every payment, loan, deposit and split on the line as a live log, newest first. New entries glow as they arrive. */
 export function Activity({ events, loading }: { events: ActivityEvent[] | null; loading: boolean }) {
-  const [showAll, setShowAll] = useState(false);
-  const shown = events ? (showAll ? events : events.slice(0, 12)) : [];
+  const seen = useRef<Set<string> | null>(null);
+  const [fresh, setFresh] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!events) return;
+    const keys = new Set(events.map(key));
+    if (seen.current === null) {
+      seen.current = keys;
+      return;
+    }
+    const added = new Set([...keys].filter((k) => !seen.current!.has(k)));
+    seen.current = keys;
+    if (added.size === 0) return;
+    setFresh(added);
+    const timer = window.setTimeout(() => setFresh(new Set()), 3000);
+    return () => window.clearTimeout(timer);
+  }, [events]);
+
   return (
-    <Card>
-      <SectionTitle title="Activity" hint="Every payment, loan, deposit and split on this line, newest first. Each one links to its transaction." />
-      <ul className="mt-4 divide-y divide-ink-line">
-        {loading && !events && Array.from({ length: 5 }, (_, i) => <li key={i} className="px-5 py-3"><Skeleton className="h-9" /></li>)}
-        {events && events.length === 0 && <li className="px-5 py-6 text-sm text-fog">Nothing has happened on this line yet.</li>}
-        {shown.map((e) => (
-          <li key={`${e.kind}-${e.at}-${e.url}`} className="flex items-start gap-3 px-5 py-3">
-            <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${highlighted.includes(e.kind) ? "bg-signal text-ink" : "bg-ink-3 text-paper"}`}>
-              {icons[e.kind]}
+    <LogPanel
+      items={events}
+      loading={loading}
+      filters={FILTERS}
+      grid={GRID}
+      rowKey={key}
+      empty="Nothing here yet."
+      columns={
+        <>
+          <span>When</span>
+          <span>Type</span>
+          <span>What happened</span>
+          <span className="text-right">Amount</span>
+        </>
+      }
+      row={(e) => {
+        const tag = EVENT_TAG[e.kind];
+        const amount = eventAmount(e);
+        return (
+          <a
+            href={e.url}
+            target="_blank"
+            rel="noreferrer"
+            className={`group grid items-baseline gap-x-3 px-5 py-2.5 transition-colors hover:bg-surface-2 ${GRID} ${fresh.has(key(e)) ? "bg-accent/10" : ""}`}
+          >
+            <span className="text-faint">{ago(e.at)}</span>
+            <span className={`hidden sm:inline ${TONE_TEXT[tag.tone]}`}>{tag.tag}</span>
+            <span className="min-w-0">
+              <span className={`mr-2 sm:hidden ${TONE_TEXT[tag.tone]}`}>{tag.tag}</span>
+              <span className="text-fg/90">{eventLine(e)}</span>
+              {e.kind === "split" && e.owedAfterUsd !== undefined && <span className="text-faint"> · owed {usd(e.owedAfterUsd)}</span>}
             </span>
-            <div className="min-w-0 flex-1">
-              <div className="text-[14px] text-paper">{e.title}</div>
-              {detail(e) && <div className="mt-0.5 truncate text-[12px] text-fog">{detail(e)}</div>}
-            </div>
-            <div className="shrink-0 text-right text-[12px]">
-              <div className="text-fog">{ago(e.at)}</div>
-              <ExtLink href={e.url} className="mt-0.5">{e.kind === "deposit" ? (e.simulated ? "PaymentVault" : "0G tx") : "tx"}</ExtLink>
-            </div>
-          </li>
-        ))}
-      </ul>
-      {events && events.length > 12 && (
-        <button onClick={() => setShowAll(!showAll)} className="w-full border-t border-ink-line px-5 py-3 text-left text-[13px] text-fog transition hover:text-paper">
-          {showAll ? "Show fewer" : `Show all ${events.length}`}
-        </button>
-      )}
-    </Card>
+            <span className="flex items-center justify-end gap-1.5">
+              {amount && e.kind !== "split" && <span className={TONE_TEXT[amount.tone]}>{amount.text}</span>}
+              <ArrowUpRight size={12} className="text-faint opacity-40 transition group-hover:opacity-100" aria-hidden="true" />
+            </span>
+          </a>
+        );
+      }}
+    />
   );
 }

@@ -1,53 +1,350 @@
 @import "tailwindcss";
 
-/* Overdraft brand: two main colours (ink, paper) and one accent (signal), used sparingly. */
-@theme {
-  --color-ink: #0f1a2a;
-  --color-ink-2: #16233a;
-  --color-ink-3: #1f2e47;
-  --color-ink-line: #2a3a52;
-  --color-paper: #f3eee4;
-  --color-paper-2: #ebe4d6;
-  --color-paper-line: #d9d1c2;
-  --color-signal: #ff5b2e;
-  --color-fog: #9aa6b6; /* secondary text on ink */
-  --color-slate: #4a5566; /* secondary text on paper */
+/* ===================================================================================================
+   Overdraft · "Machine economy". One set of tokens, two themes. Orange is credit going out, green is
+   money coming back; blue and violet tag chains and services. Everything else is neutral.
+   =================================================================================================== */
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #07090c;
+  --bg-2: #0a0d12;
+  --surface: #0d1117;
+  --surface-2: #121821;
+  --surface-3: #18202b;
+  --line: #1b2129;
+  --line-2: #29313c;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --faint: #6e7681;
+  --accent: #ff6b35;
+  --accent-ink: #07090c;
+  --ok: #3fb950;
+  --info: #79c0ff;
+  --violet: #d2a8ff;
+  --dot: rgb(230 237 243 / 0.085);
+  --shadow: 0 30px 80px -40px rgb(0 0 0 / 0.9);
+  --glow: rgb(255 107 53 / 0.18);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #fbfcfd;
+  --bg-2: #f4f6f9;
+  --surface: #ffffff;
+  --surface-2: #f5f7fa;
+  --surface-3: #eef1f5;
+  --line: #e3e8ee;
+  --line-2: #d3dae3;
+  --text: #0d1117;
+  --muted: #57606a;
+  --faint: #6e7781;
+  --accent: #e5531d;
+  --accent-ink: #ffffff;
+  --ok: #1a7f37;
+  --info: #0969da;
+  --violet: #8250df;
+  --dot: rgb(13 17 23 / 0.09);
+  --shadow: 0 30px 70px -40px rgb(13 17 23 / 0.28);
+  --glow: rgb(229 83 29 / 0.14);
 }
 
 @theme inline {
-  --font-serif: var(--font-instrument-serif), Georgia, serif;
-  --font-sans: var(--font-inter), system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+  --color-canvas: var(--bg);
+  --color-canvas-2: var(--bg-2);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-fg: var(--text);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-ok: var(--ok);
+  --color-info: var(--info);
+  --color-violet: var(--violet);
+
+  --font-sans: var(--font-geist), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 html {
-  background: var(--color-paper);
-  color: var(--color-ink);
+  background: var(--bg);
+  color: var(--text);
+  scroll-behavior: smooth;
+  scroll-padding-top: 5rem;
 }
-
 body {
   font-family: var(--font-sans);
-  font-feature-settings: "cv11", "ss01";
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  background: var(--bg);
 }
-
 ::selection {
-  background: var(--color-signal);
-  color: var(--color-ink);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 .tabular {
   font-variant-numeric: tabular-nums;
 }
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+.display {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  line-height: 0.98;
 }
 
+/* ---------------------------------------------------------------------------------------------------
+   Surfaces
+   --------------------------------------------------------------------------------------------------- */
+.dots {
+  background-image: radial-gradient(var(--dot) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.fade-edges {
+  mask-image: radial-gradient(ellipse at center, #000 40%, transparent 80%);
+}
+.fade-bottom {
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+.glow {
+  background: radial-gradient(closest-side, var(--glow), transparent);
+}
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+.hairline {
+  border: 1px solid var(--line);
+}
+
+/* A card whose border lights up under the pointer (the position comes from --x / --y, set on move). */
+.spotlight {
+  position: relative;
+  isolation: isolate;
+}
+.spotlight::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  padding: 1px;
+  background: radial-gradient(260px circle at var(--x, 50%) var(--y, -40%), var(--accent), transparent 65%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.spotlight:hover::before {
+  opacity: 0.85;
+}
+
+/* ---------------------------------------------------------------------------------------------------
+   Motion. Decoration on a complete page; all of it stops for reduced motion.
+   --------------------------------------------------------------------------------------------------- */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes shimmer {
+  to { background-position: -200% 0; }
+}
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, currentColor 55%, transparent); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+@keyframes marquee {
+  to { transform: translateX(-50%); }
+}
+@keyframes scan {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(100vh); }
+}
+@keyframes draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes travel {
+  from { offset-distance: 0%; }
+  to { offset-distance: 100%; }
+}
+
+.enter {
+  animation: rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.enter-1 { animation-delay: 0.06s; }
+.enter-2 { animation-delay: 0.14s; }
+.enter-3 { animation-delay: 0.22s; }
+.enter-4 { animation-delay: 0.3s; }
+
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: pulse-ring 2s ease-out infinite;
+}
+.caret::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--accent);
+  animation: blink 1s steps(1) infinite;
+}
+.marquee {
+  mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+}
+.marquee-track {
+  animation: marquee 60s linear infinite;
+}
+.marquee:hover .marquee-track {
+  animation-play-state: paused;
+}
 .live-dot {
-  animation: pulse-dot 1.6s ease-in-out infinite;
+  animation: blink 1.6s ease-in-out infinite;
+}
+
+/* Small, looping illustrations on the landing tiles. */
+@keyframes march {
+  to { stroke-dashoffset: -20; }
+}
+.march {
+  animation: march 1s linear infinite;
+}
+@keyframes grow-x {
+  0% { transform: scaleX(0); }
+  22%, 88% { transform: scaleX(1); opacity: 1; }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+.grow-x {
+  transform-origin: left;
+  animation: grow-x 4.5s cubic-bezier(0.2, 0.7, 0.2, 1) infinite both;
+}
+@keyframes sheen {
+  from { background-position: 160% 0; }
+  to { background-position: -60% 0; }
+}
+.sheen {
+  background: linear-gradient(115deg, transparent 42%, rgb(255 255 255 / 0.1) 50%, transparent 58%);
+  background-size: 250% 100%;
+  animation: sheen 5s ease-in-out infinite;
+}
+@keyframes swap {
+  0%, 44% { opacity: 1; }
+  50%, 94% { opacity: 0; }
+  100% { opacity: 1; }
+}
+.swap-a {
+  animation: swap 6s ease infinite;
+}
+.swap-b {
+  animation: swap 6s ease infinite;
+  animation-delay: -3s;
+}
+@keyframes stamp {
+  from { scale: 1.8; opacity: 0; }
+  60% { scale: 0.94; opacity: 1; }
+  to { scale: 1; opacity: 1; }
+}
+.stamp {
+  animation: stamp 0.5s 0.6s cubic-bezier(0.3, 0.7, 0.3, 1.2) both;
+}
+
+.draw-path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: draw 2.2s 0.4s cubic-bezier(0.6, 0, 0.2, 1) forwards;
+}
+.draw-dot {
+  opacity: 0;
+  animation: fade 0.5s 1.5s ease forwards;
+}
+@keyframes tick {
+  0%, 8% { background: transparent; border-color: var(--line-2); color: var(--faint); }
+  14%, 82% { background: var(--ok); border-color: var(--ok); color: var(--accent-ink); }
+  92%, 100% { background: transparent; border-color: var(--line-2); color: var(--faint); }
+}
+.tick {
+  animation: tick 7s ease infinite both;
+}
+
+/* Reveal on scroll with the browser's scroll timeline: no JavaScript. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal {
+      animation: rise both cubic-bezier(0.2, 0.7, 0.2, 1);
+      animation-timeline: view();
+      animation-range: entry 0% entry 45%;
+    }
+    .stamp {
+      animation-timeline: view();
+      animation-range: entry 60% cover 45%;
+      animation-delay: 0s;
+    }
+  }
+}
+
+/* The boot screen: the mark's line dips into the red and recovers, then the page shows. Once per visit. */
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  pointer-events: none;
+  animation: fade 0.45s 1.05s ease reverse both;
+}
+.boot svg .line {
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: draw 0.8s 0.1s cubic-bezier(0.6, 0, 0.2, 1) forwards;
+}
+.boot svg .dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: rise 0.35s 0.55s ease both;
+}
+.boot .label {
+  animation: fade 0.4s 0.45s ease both;
+}
+:root.booted .boot {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .live-dot { animation: none; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  html { scroll-behavior: auto; }
+  .boot { display: none; }
+  .grow-x, .swap-a, .swap-b, .tick, .march, .sheen { animation: none !important; }
+  .swap-b { opacity: 0; }
 }

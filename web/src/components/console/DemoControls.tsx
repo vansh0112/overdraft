@@ -70,8 +70,8 @@ export function DemoControls() {
     return (
       <Card className="flex flex-wrap items-center justify-between gap-3 p-5">
         <div>
-          <div className="font-serif text-[22px] leading-none text-paper">Run the demo</div>
-          <p className="mt-2 max-w-2xl text-[13px] text-fog">
+          <div className="text-[20px] font-semibold tracking-[-0.025em] leading-tight text-fg">Run the demo</div>
+          <p className="mt-2 max-w-2xl text-[13px] text-muted">
             Demo actions send real testnet payments, so they run on the presenter&apos;s machine. Everything above updates here within seconds when they do.
           </p>
         </div>
@@ -85,7 +85,7 @@ export function DemoControls() {
         hint="These start real transactions on Hedera testnet. A rush sends paid jobs from five customer wallets at once, so the agent has to borrow."
       />
       <div className="flex flex-wrap items-center gap-3 px-5 pt-5">
-        <label className="flex items-center gap-2 rounded-xl border border-ink-line bg-ink px-3 py-2 text-[13px] text-fog focus-within:border-fog">
+        <label className="flex items-center gap-2 rounded-xl border border-line bg-canvas px-3 py-2 text-[13px] text-muted focus-within:border-muted">
           <KeyRound size={14} />
           <input
             type="password"
@@ -93,30 +93,30 @@ export function DemoControls() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Demo password"
             aria-label="Demo password"
-            className="w-44 bg-transparent text-paper outline-none placeholder:text-fog"
+            className="w-44 bg-transparent text-fg outline-none placeholder:text-muted"
           />
         </label>
         <button
           onClick={() => start("/api/demo/rush", { jobs: 8 })}
           disabled={busy || !password}
-          className="inline-flex items-center gap-2 rounded-xl bg-signal px-4 py-2 text-[14px] font-semibold text-ink transition hover:brightness-110 disabled:opacity-40"
+          className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-[14px] font-semibold text-accent-ink transition hover:brightness-110 disabled:opacity-40"
         >
           <Play size={15} /> Send a rush of 8 paid jobs
         </button>
         <button
           onClick={() => start("/api/demo/check-fake-agent")}
           disabled={busy || !password}
-          className="inline-flex items-center gap-2 rounded-xl border border-ink-line px-4 py-2 text-[14px] font-semibold text-paper transition hover:border-fog disabled:opacity-40"
+          className="inline-flex items-center gap-2 rounded-xl border border-line px-4 py-2 text-[14px] font-semibold text-fg transition hover:border-muted disabled:opacity-40"
         >
           <Search size={15} /> Re-check the fake agent
         </button>
-        {message && <span className="text-[13px] text-signal">{message}</span>}
+        {message && <span className="text-[13px] text-accent">{message}</span>}
       </div>
       <div className="p-5">
-        <div className="mb-2 text-[12px] text-fog">
+        <div className="mb-2 text-[12px] text-muted">
           {run?.name ? `${run.name}: ${run.running ? "running…" : run.exitCode === 0 ? "finished" : `stopped (exit ${run.exitCode})`}` : "Nothing run yet in this session."}
         </div>
-        <pre className="max-h-72 overflow-auto rounded-xl border border-ink-line bg-ink p-4 font-mono text-[12px] leading-relaxed text-fog">
+        <pre className="max-h-72 overflow-auto rounded-xl border border-line bg-canvas p-4 font-mono text-[12px] leading-relaxed text-muted">
           {run?.output.length ? run.output.join("\n") : "Output appears here."}
         </pre>
       </div>

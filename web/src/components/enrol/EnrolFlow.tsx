@@ -20,11 +20,11 @@ type StepState = "done" | "current" | "locked";
 type Form = { agent: string; zgAccount: string; sameZg: boolean; endpoint: string; incomeFrom: "none" | "agent" | "owner"; cost: string };
 
 const primary =
-  "inline-flex items-center justify-center gap-2 rounded-xl bg-signal px-4 py-2.5 text-[14px] font-semibold text-ink transition hover:brightness-110 disabled:opacity-40";
+  "inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-[14px] font-semibold text-accent-ink transition hover:brightness-110 disabled:opacity-40";
 const secondary =
-  "inline-flex items-center justify-center gap-2 rounded-xl border border-ink-line px-4 py-2.5 text-[14px] font-semibold text-paper transition hover:border-fog disabled:opacity-40";
+  "inline-flex items-center justify-center gap-2 rounded-xl border border-line px-4 py-2.5 text-[14px] font-semibold text-fg transition hover:border-muted disabled:opacity-40";
 const input =
-  "w-full rounded-xl border border-ink-line bg-ink px-3 py-2.5 font-mono text-[14px] text-paper outline-none transition placeholder:text-fog focus:border-fog";
+  "w-full rounded-xl border border-line bg-canvas px-3 py-2.5 font-mono text-[14px] text-fg outline-none transition placeholder:text-muted focus:border-muted";
 
 function Step({ n, title, state, summary, children }: { n: number; title: string; state: StepState; summary?: React.ReactNode; children?: React.ReactNode }) {
   return (
@@ -32,15 +32,15 @@ function Step({ n, title, state, summary, children }: { n: number; title: string
       <div className="flex items-start gap-3.5">
         <span
           className={`grid h-7 w-7 shrink-0 place-items-center rounded-full font-mono text-[13px] ${
-            state === "done" ? "bg-signal text-ink" : state === "current" ? "border border-paper text-paper" : "border border-ink-line text-fog"
+            state === "done" ? "bg-accent text-accent-ink" : state === "current" ? "border border-fg text-fg" : "border border-line text-muted"
           }`}
           aria-hidden="true"
         >
           {state === "done" ? <Check size={14} strokeWidth={3} /> : n}
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="pt-0.5 text-[16px] font-semibold text-paper">{title}</h2>
-          {summary && <div className="mt-1 text-[13px] text-fog">{summary}</div>}
+          <h2 className="pt-0.5 text-[16px] font-semibold text-fg">{title}</h2>
+          {summary && <div className="mt-1 text-[13px] text-muted">{summary}</div>}
           {children && state !== "locked" && <div className="mt-4">{children}</div>}
         </div>
       </div>
@@ -59,7 +59,7 @@ export function CopyValue({ value }: { value: string }) {
           setTimeout(() => setCopied(false), 1500);
         });
       }}
-      className="inline-flex items-center gap-2 rounded-lg border border-ink-line px-2.5 py-1 font-mono text-[13px] text-paper transition hover:border-fog"
+      className="inline-flex items-center gap-2 rounded-lg border border-line px-2.5 py-1 font-mono text-[13px] text-fg transition hover:border-muted"
       aria-label={`Copy ${value}`}
     >
       {value} {copied ? <Check size={13} /> : <Copy size={13} />}
@@ -68,11 +68,11 @@ export function CopyValue({ value }: { value: string }) {
 }
 
 function Hint({ children }: { children: React.ReactNode }) {
-  return <p className="mt-1.5 text-[12.5px] leading-relaxed text-fog">{children}</p>;
+  return <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">{children}</p>;
 }
 
 function Problem({ children }: { children: React.ReactNode }) {
-  return <p className="mt-2 text-[13px] text-signal">{children}</p>;
+  return <p className="mt-2 text-[13px] text-accent">{children}</p>;
 }
 
 /** Client-side checks; the API checks everything again. */
@@ -188,8 +188,8 @@ export function EnrolFlow() {
   return (
     <div className="mx-auto w-full max-w-[860px] px-4 py-8 sm:px-6">
       <Crumbs items={[{ label: "Dashboard", href: "/dashboard" }, { label: "Enrol an agent" }]} />
-      <h1 className="font-serif text-[44px] leading-[1.02] text-paper sm:text-[52px]">Enrol an agent for credit</h1>
-      <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-fog">
+      <h1 className="display enter text-[40px] sm:text-[54px]">Enrol an agent for credit</h1>
+      <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-muted">
         Five steps. Your agent gets an income contract that repays its loans from what customers pay, and a credit line that opens once a credit
         check finds enough real income.
       </p>
@@ -206,9 +206,9 @@ export function EnrolFlow() {
               {wallet.status === "loading" ? (
                 <Skeleton className="h-10 w-48" />
               ) : wallet.status === "none" ? (
-                <p className="text-[14px] text-fog">
+                <p className="text-[14px] text-muted">
                   No wallet found in this browser.{" "}
-                  <a href="https://metamask.io/download" target="_blank" rel="noreferrer" className="text-paper underline underline-offset-4">
+                  <a href="https://metamask.io/download" target="_blank" rel="noreferrer" className="text-fg underline underline-offset-4">
                     Install MetaMask
                   </a>{" "}
                   to continue.
@@ -219,7 +219,7 @@ export function EnrolFlow() {
                 </button>
               ) : !onHedera ? (
                 <div>
-                  <p className="text-[14px] text-fog">Your wallet is on another network. Enrolling happens on Hedera testnet.</p>
+                  <p className="text-[14px] text-muted">Your wallet is on another network. Enrolling happens on Hedera testnet.</p>
                   <button onClick={() => act("wallet", switchToHedera)} disabled={busy !== null} className={`${primary} mt-3`}>
                     Switch to Hedera testnet
                   </button>
@@ -228,7 +228,7 @@ export function EnrolFlow() {
                 <Skeleton className="h-10 w-64" />
               ) : !r.account || r.hbar < MIN_HBAR ? (
                 <div>
-                  <p className="text-[14px] text-fog">
+                  <p className="text-[14px] text-muted">
                     {r.account
                       ? `Your account ${r.account} has ${r.hbar.toFixed(2)} HBAR. Registering and approving your agent's ID take two small transactions, so top up to at least ${MIN_HBAR} HBAR.`
                       : "This address isn't on Hedera testnet yet. Sending it free test HBAR creates its account."}
@@ -244,7 +244,7 @@ export function EnrolFlow() {
                   <Hint>Paste {short(address)} into the faucet. It takes a few seconds to arrive.</Hint>
                 </div>
               ) : (
-                <p className="text-[14px] text-fog">
+                <p className="text-[14px] text-muted">
                   Your account {r.account} can&apos;t receive USDC yet, so your share of the agent&apos;s income couldn&apos;t reach you. In your wallet, associate
                   token {cfg?.usdc}, then refresh.
                 </p>
@@ -262,7 +262,7 @@ export function EnrolFlow() {
           summary={idDone ? `Agent #${picked}, its ERC-8004 identity, owned by this wallet` : undefined}
         >
           {enrolled ? null : idDone ? (
-            <button onClick={() => setPicked(null)} className="text-[13px] text-paper underline underline-offset-4">
+            <button onClick={() => setPicked(null)} className="text-[13px] text-fg underline underline-offset-4">
               Choose another
             </button>
           ) : (
@@ -276,7 +276,7 @@ export function EnrolFlow() {
                       aria-checked={picked === id}
                       onClick={() => setPicked(id)}
                       className={`rounded-xl border px-3.5 py-2 text-[14px] font-semibold transition ${
-                        picked === id ? "border-paper bg-paper text-ink" : "border-ink-line text-paper hover:border-fog"
+                        picked === id ? "border-fg bg-fg text-canvas" : "border-line text-fg hover:border-muted"
                       }`}
                     >
                       Agent #{id}
@@ -295,16 +295,16 @@ export function EnrolFlow() {
                 </Problem>
               )}
 
-              <div className={candidates.length > 0 ? "mt-5 border-t border-ink-line pt-5" : ""}>
-                <div className="text-[14px] font-semibold text-paper">{candidates.length > 0 ? "Or register a new one" : "Register your agent's ID"}</div>
+              <div className={candidates.length > 0 ? "mt-5 border-t border-line pt-5" : ""}>
+                <div className="text-[14px] font-semibold text-fg">{candidates.length > 0 ? "Or register a new one" : "Register your agent's ID"}</div>
                 <Hint>This mints your agent&apos;s ERC-8004 identity, the on-chain ID that stands as collateral, to your wallet.</Hint>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <label className="block">
-                    <span className="text-[12.5px] text-fog">Agent name</span>
+                    <span className="text-[12.5px] text-muted">Agent name</span>
                     <input value={newName} onChange={(e) => setNewName(e.target.value.slice(0, 60))} placeholder="Translation agent" className={`${input} mt-1 font-sans`} />
                   </label>
                   <label className="block">
-                    <span className="text-[12.5px] text-fog">What it does (optional)</span>
+                    <span className="text-[12.5px] text-muted">What it does (optional)</span>
                     <input
                       value={newDescription}
                       onChange={(e) => setNewDescription(e.target.value.slice(0, 160))}
@@ -330,7 +330,7 @@ export function EnrolFlow() {
         >
           {!collateralDone && (
             <div>
-              <p className="text-[14px] leading-relaxed text-fog">
+              <p className="text-[14px] leading-relaxed text-muted">
                 The ID stays in your wallet. When your agent borrows, the credit line holds it, and it comes back automatically once the loan is
                 repaid. If the agent doesn&apos;t repay, or redirects its income, the lender keeps it. This one approval covers all your agents.
               </p>
@@ -350,14 +350,14 @@ export function EnrolFlow() {
           {!enrolled && (
           <div className="grid gap-4">
             <label className="block">
-              <span className="text-[13px] text-paper">Agent wallet</span>
+              <span className="text-[13px] text-fg">Agent wallet</span>
               <input value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value.trim() })} placeholder="0x…" className={`${input} mt-1`} />
               <Hint>The wallet your agent signs loan requests with. Only this wallet can borrow on the line.</Hint>
               {errors.agent && <Problem>{errors.agent}</Problem>}
             </label>
             <div>
-              <label className="flex items-center gap-2 text-[13px] text-paper">
-                <input type="checkbox" checked={form.sameZg} onChange={(e) => setForm({ ...form, sameZg: e.target.checked })} className="accent-[#ff5b2e]" />
+              <label className="flex items-center gap-2 text-[13px] text-fg">
+                <input type="checkbox" checked={form.sameZg} onChange={(e) => setForm({ ...form, sameZg: e.target.checked })} className="accent-accent" />
                 Its 0G compute account is the same address
               </label>
               {!form.sameZg && (
@@ -367,7 +367,7 @@ export function EnrolFlow() {
               {errors.zgAccount && <Problem>{errors.zgAccount}</Problem>}
             </div>
             <label className="block">
-              <span className="text-[13px] text-paper">Paid endpoint</span>
+              <span className="text-[13px] text-fg">Paid endpoint</span>
               <input
                 value={form.endpoint}
                 onChange={(e) => setForm({ ...form, endpoint: e.target.value.trim() })}
@@ -378,7 +378,7 @@ export function EnrolFlow() {
               {errors.endpoint && <Problem>{errors.endpoint}</Problem>}
             </label>
             <fieldset>
-              <legend className="text-[13px] text-paper">Where have customers paid it so far?</legend>
+              <legend className="text-[13px] text-fg">Where have customers paid it so far?</legend>
               <div className="mt-2 flex flex-wrap gap-2">
                 {(
                   [
@@ -390,7 +390,7 @@ export function EnrolFlow() {
                   <label
                     key={value}
                     className={`cursor-pointer rounded-xl border px-3 py-2 text-[13px] transition ${
-                      form.incomeFrom === value ? "border-paper bg-paper text-ink" : "border-ink-line text-paper hover:border-fog"
+                      form.incomeFrom === value ? "border-fg bg-fg text-canvas" : "border-line text-fg hover:border-muted"
                     }`}
                   >
                     <input type="radio" name="income" value={value} checked={form.incomeFrom === value} onChange={() => setForm({ ...form, incomeFrom: value })} className="sr-only" />
@@ -404,7 +404,7 @@ export function EnrolFlow() {
               )}
             </fieldset>
             <label className="block sm:max-w-xs">
-              <span className="text-[13px] text-paper">AI cost per job (USD)</span>
+              <span className="text-[13px] text-fg">AI cost per job (USD)</span>
               <input value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value.trim() })} inputMode="decimal" className={`${input} mt-1`} />
               <Hint>What one job costs your agent in AI compute. Each job must earn at least 20% more than this.</Hint>
               {errors.cost && <Problem>{errors.cost}</Problem>}
@@ -416,7 +416,7 @@ export function EnrolFlow() {
         <Step n={5} title="Sign and enrol" state={enrolled ? "done" : detailsDone ? "current" : "locked"}>
           {!current || current.state === "failed" ? (
             <div>
-              <p className="text-[14px] leading-relaxed text-fog">
+              <p className="text-[14px] leading-relaxed text-muted">
                 Your wallet asks you to sign agent #{picked}&apos;s details. Signing is free and sends nothing. We then deploy its income contract, bind it
                 to the credit line, open its line with no credit yet and publish your signed application on Arkiv.
               </p>
@@ -432,22 +432,22 @@ export function EnrolFlow() {
             </div>
           ) : enrolled ? (
             <div>
-              <p className="text-[15px] font-semibold text-paper">Agent #{enrolled.agentId} is enrolled.</p>
-              <div className="mt-4 rounded-xl border border-ink-line bg-ink p-4">
-                <div className="text-[13px] text-fog">Its income contract</div>
+              <p className="text-[15px] font-semibold text-fg">Agent #{enrolled.agentId} is enrolled.</p>
+              <div className="mt-4 rounded-xl border border-line bg-canvas p-4">
+                <div className="text-[13px] text-muted">Its income contract</div>
                 <div className="mt-2">
                   <CopyValue value={enrolled.result.splitterId} />
                 </div>
-                <p className="mt-3 text-[14px] leading-relaxed text-paper">
+                <p className="mt-3 text-[14px] leading-relaxed text-fg">
                   Next, set your endpoint&apos;s x402 <span className="font-mono">payTo</span> to {enrolled.result.splitterId}. Every payment then repays
                   loans first and sends the rest to you.
                 </p>
-                <p className="mt-2 text-[13px] leading-relaxed text-fog">
+                <p className="mt-2 text-[13px] leading-relaxed text-muted">
                   Once a few customers have paid it, run a credit check on your agent&apos;s page. The check needs income from at least three independent
                   customers.
                 </p>
               </div>
-              {enrolled.result.warning && <p className="mt-3 text-[13px] text-fog">{enrolled.result.warning}</p>}
+              {enrolled.result.warning && <p className="mt-3 text-[13px] text-muted">{enrolled.result.warning}</p>}
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <Link href={`/agents/${enrolled.agentId}`} className={primary}>
                   Open agent #{enrolled.agentId} <ArrowRight size={15} />
