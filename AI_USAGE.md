@@ -26,7 +26,7 @@ The project was planned before it was built, and the AI agent was given one clea
 |---|---|---|
 | Smart contracts | `contracts/` | Generated `CreditLine` and `IncomeSplitter` to my design, deployed and tested them on Hedera testnet. |
 | Services | `python/overdraft/` | Generated the underwriter, credit bureau, relay, sweeper, watcher, enrolment, console API and demo agent. |
-| x402 gateway | `gateway/` | Generated the payment gateway, the customer agents and the public test endpoint. |
+| x402 gateway | `gateway/` | Generated the payment gateway, the customer agents, endpoint discovery through ERC-8004 and the public test endpoint. |
 | Web app | `web/` | Generated the pages, design system, light and dark themes and animations, to the direction I chose. |
 | Testing | — | Ran the browser and testnet tests. |
 | Deployment | `Dockerfile`, `deploy/`, `railway.json`, `web/vercel.json` | Generated the deployment setup. |
@@ -45,4 +45,5 @@ The project was planned before it was built, and the AI agent was given one clea
 | 0G | Simulate the 0G deposit, following the 0G team's advice, and say so clearly in the app. |
 | Design | Redesign the site as a premium product in the "machine economy" direction, with light and dark modes, purposeful animation and no repeated content. |
 | Live testing | Deploy a public test endpoint so judges can enrol on the live site, then walk me through testing everything, one test at a time. |
+| Discovery | Let customer agents find an agent's paid endpoint from its ERC-8004 ID card instead of being given the URL. |
 | Submission | Write the documents each track requires, and this file. |

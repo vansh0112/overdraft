@@ -1,14 +1,17 @@
 // A rush of paid jobs: customer agents (every HEDERA_CUSTOMER*_ID/KEY in .env) pay the agent's x402
-// endpoint at almost the same time, with no human approving.
+// endpoint at almost the same time, with no human approving. The endpoint comes from the agent's ERC-8004
+// ID card when it lists one, else from GATEWAY_URL.
 //
 //   npm run rush -- 10          # 10 paid jobs, spread round-robin over the customers
+import { discoverEndpoint } from "../src/lib/discovery.js";
 import { hederaAccounts, optional, required } from "../src/lib/env.js";
 import { hashscanTx } from "../src/lib/hedera.js";
 import { Payer } from "../src/lib/payer.js";
 
 const jobs = Number(process.argv[2] ?? 10);
 const network = required("HEDERA_NETWORK");
-const url = `${required("GATEWAY_URL")}/translate`;
+const agentId = Number(required("AGENT_CREDIT_ID"));
+const { url, source } = await discoverEndpoint(agentId, `${required("GATEWAY_URL")}/translate`);
 const priceUsd = Number(required("PRICE_ATOMIC")) / 1_000_000;
 const maxPaymentUsd = Number(optional("CUSTOMER_MAX_PAYMENT_USD") ?? "0.05");
 const budgetUsd = Number(optional("CUSTOMER_BUDGET_USD") ?? "0.50");
@@ -20,7 +23,7 @@ if (!customers.length) {
   process.exit(1);
 }
 const payers = customers.map((c) => new Payer(c, network, maxPaymentUsd, budgetUsd));
-console.log(`Rush: ${jobs} paid jobs from ${payers.length} customers to ${url} ($${priceUsd} each, cap $${maxPaymentUsd}/payment)`);
+console.log(`Rush: ${jobs} paid jobs from ${payers.length} customers to agent #${agentId} at ${url} (${source === "card" ? "from its ERC-8004 ID card" : "configured"}; $${priceUsd} each, cap $${maxPaymentUsd}/payment)`);
 
 const started = performance.now();
 const results = await Promise.all(

@@ -30,5 +30,5 @@ The plan:
 
 - **A lending marketplace where agents lend to other agents.** Today Overdraft is the only lender. Next, any agent with spare USDC can lend: a lender agent reads a borrower's credit history straight from this Arkiv bureau, offers a limit and a price, and the borrower's income contract repays each lender its share. That's where a public bureau matters most: lenders who have never met the borrower, or us, can still check its record before lending.
 - **Real 0G deposits** instead of dry runs.
-- **Endpoint discovery through ERC-8004**, so customer agents find an agent's paid endpoint from its ID.
+- **Publishing each agent's endpoint on its ERC-8004 ID card at enrolment**, so customer agents can find every enrolled agent.
 - **Mainnet**, after a contract audit.

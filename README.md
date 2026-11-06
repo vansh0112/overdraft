@@ -58,17 +58,21 @@ MetaMask may label the new `vercel.app` address as a suspicious site; the transa
 | `payTo` | The agent's `IncomeSplitter` contract, e.g. [`0.0.11330131`](https://hashscan.io/testnet/contract/0.0.11330131) for agent #140 |
 | Seller | [`gateway/src/server.ts`](gateway/src/server.ts) (`@x402/express`, `@x402/hedera`) |
 | Buyers | [`gateway/src/lib/payer.ts`](gateway/src/lib/payer.ts) (`@x402/fetch`); five customer agents in [`gateway/scripts/rush.ts`](gateway/scripts/rush.ts) |
+| Discovery | [`gateway/src/lib/discovery.ts`](gateway/src/lib/discovery.ts): finds an agent's endpoint on its ERC-8004 ID card |
 
-**The payment flow.** No human approves anything, and customers are only charged for work that succeeds:
+**The payment flow.** A customer agent only needs the agent's ID: it finds where to pay on the agent's ERC-8004 ID card, then pays. No human approves anything, and customers are only charged for work that succeeds:
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant C as Customer agent
+    participant R as ERC-8004 registry
     participant G as Agent's x402 endpoint
     participant F as x402 facilitator
     participant H as Hedera
     participant S as IncomeSplitter
+    C->>R: tokenURI(agent ID)
+    R-->>C: ID card: services lists the x402 endpoint
     C->>G: POST /translate, no payment
     G-->>C: 402 Payment Required: $0.02 USDC, payTo = splitter
     Note right of C: Signs a USDC transfer within its $0.05 cap
@@ -87,6 +91,7 @@ sequenceDiagram
 - [`0.0.9185802@1793973313.630032046`](https://hashscan.io/testnet/transaction/0.0.9185802@1793973313.630032046)
 - [`0.0.9185802@1793973315.052092134`](https://hashscan.io/testnet/transaction/0.0.9185802@1793973315.052092134)
 - Through the public test endpoint, into agent #153's splitter: [`0.0.9185802@1793972289.538654615`](https://hashscan.io/testnet/transaction/0.0.9185802@1793972289.538654615)
+- Found from an ERC-8004 ID card: a customer given only agent #165's ID read its card, found its endpoint and paid it: [`0.0.9185802@1793987735.547551317`](https://hashscan.io/testnet/transaction/0.0.9185802@1793987735.547551317)
 
 **What that rush caused on-chain:** two loans, [$0.02](https://hashscan.io/testnet/transaction/0x88900ae4dce11b93a7428c812290266616e2b8e44654c891148a48cf63d3952d) and [$0.04](https://hashscan.io/testnet/transaction/0x7a53481d6f71555196ed0751c1d29b36028be5393ce997687968f0025b2359eb), then a [$0.16 income split](https://hashscan.io/testnet/transaction/0xbdea0c807cd0caa99c84f34b080abe1340b2b44558ee18c488a79b293d66bd65) that paid the lender first.
 
@@ -103,6 +108,7 @@ Every enrolled agent gets its own IncomeSplitter; the CreditLine's `LimitSet` ev
 **Beyond the basics**
 - **Spend controls.** Customer agents cap every payment at $0.05 (`x402Client.setSpendControls`). Agents can only borrow within their limit, and the limit comes from underwriting.
 - **ERC-8004 identity** is the collateral: locked in the CreditLine while the agent owes, returned on repayment, kept on default.
+- **Endpoint discovery through ERC-8004.** Customer agents read the agent's ID card (its `tokenURI` on the official registry), take the entry named `x402` under `services`, and pay it. They refuse an agent whose card lists no endpoint, rather than pay an address they can't account for; only our own demo agent falls back to its configured address.
 - **USDC settlement and revenue split**: every payment is USDC, split three ways by the agent's IncomeSplitter.
 - **A public test endpoint** (`/sandbox/<agent ID>/translate`) whose `payTo` is the owner before enrolment and the agent's splitter after, so it pays the income contract automatically.
 
@@ -216,7 +222,7 @@ cd python && .venv/bin/python -m overdraft.bureau watch --interval 15 # Arkiv re
 cd web && npm run dev                                                  # http://localhost:3000
 ```
 
-Then `cd gateway && npm run rush -- 8` sends a rush of paid jobs, and the agent borrows.
+Then `cd gateway && npm run rush -- 8` sends a rush of paid jobs, and the agent borrows. `npm run pay-once -- <agent ID>` hires any agent whose ID card lists an x402 endpoint, from its ID alone.
 
 ## Repository layout
 
@@ -251,7 +257,7 @@ Everything in this repository was written during ETHGlobal Mumbai 2026. What we 
 
 - **A lending marketplace where agents lend to other agents.** Any agent with spare USDC could lend: it reads the borrower's credit history from the Arkiv bureau, offers a limit and a price, and the borrower's IncomeSplitter repays each lender its share.
 - **Real 0G deposits** instead of dry runs.
-- **Endpoint discovery through ERC-8004**, so customer agents find an agent's paid endpoint from its ID.
+- **Publishing each agent's endpoint on its ID card at enrolment**, so customer agents can find every enrolled agent.
 - **Mainnet**, after a contract audit.
 
 ## Team

@@ -146,6 +146,16 @@ export default function Docs() {
             customers to pay the agent&apos;s owner; afterwards it asks them to pay the agent&apos;s income contract, so the next step happens by itself.
           </P>
           <P>
+            Customer agents find where to pay on the agent&apos;s ERC-8004 ID card: the registration file its ID points to lists the endpoint under{" "}
+            <C>services</C>, in an entry named <C>x402</C>. Add it, and a customer that knows only the agent&apos;s ID can hire it. The card can only change
+            while the owner holds the ID, so set it before the agent&apos;s first loan.
+          </P>
+          <Code>{`{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "Translation agent",
+  "services": [{ "name": "x402", "endpoint": "https://your-agent.example.com/translate" }]
+}`}</Code>
+          <P>
               Then the owner sets the endpoint&apos;s <C>payTo</C> to the new income contract. Once a few customers have paid it, the owner signs a
               credit check on the agent&apos;s page. It only runs while the endpoint asks customers to pay the income contract, because that is how loans
               get repaid. The underwriter traces the income as described below, publishes the decision on Arkiv and sets the limit, or shows what
