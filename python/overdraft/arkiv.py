@@ -156,16 +156,43 @@ def query(condition: str, *, select: dict | None = None, limit: int = 100, offse
     return _rpc("arkiv_query", [condition, params])
 
 
+class StalePage(RuntimeError):
+    """A later page of a query came back after the node had moved past the block its cursor belongs to."""
+
+
+PAGE_THROUGH_ATTEMPTS = 3
+
+
 def query_all(condition: str, *, select: dict | None = None, max_pages: int = 20) -> list[dict]:
-    """Every entity matching the condition, following the node's cursor 100 at a time."""
+    """Every entity matching the condition, following the node's cursor 100 at a time.
+
+    A cursor belongs to the block its first page was read at, and Arkiv's node only answers at the latest block
+    (about 2 seconds), so a long page-through can outlive its block. It then starts again from the first page.
+    """
+    for attempt in range(PAGE_THROUGH_ATTEMPTS):
+        try:
+            return _page_through(condition, select, max_pages)
+        except StalePage:
+            if attempt == PAGE_THROUGH_ATTEMPTS - 1:
+                raise
+    return []
+
+
+def _page_through(condition: str, select: dict | None, max_pages: int) -> list[dict]:
     params = {"select": select or {"key": True, "attributes": True}, "limit": hex(MAX_PAGE)}
     entities: list[dict] = []
     for _ in range(max_pages):
-        page = _rpc("arkiv_query", [condition, params])
+        try:
+            page = _rpc("arkiv_query", [condition, params])
+        except RuntimeError as error:
+            if "cursor" in params and ("-32005" in str(error) or "-32006" in str(error)):
+                raise StalePage(str(error)) from error
+            raise
         entities.extend(page["data"])
         if len(page["data"]) < MAX_PAGE or not page.get("cursor"):
             break
-        params = {**params, "cursor": page["cursor"]}
+        # Later pages ask for the block the first page was read at, which the cursor belongs to.
+        params = {**params, "cursor": page["cursor"], "atBlock": params.get("atBlock") or page["blockNumber"]}
     return entities
 
 
