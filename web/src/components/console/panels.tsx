@@ -1,15 +1,33 @@
 import { Cpu, Lock, LockOpen, ShieldExclamationPoint } from "lucide-react";
-import type { ActivityEvent, AgentStatus, Line } from "@/lib/api";
-import { ago, date, usd } from "@/lib/format";
+import type { ActivityEvent, AgentStatus, Compute, Contracts, Line } from "@/lib/api";
+import { ago, date, short, usd } from "@/lib/format";
 import { Card, ExtLink, Pill, Stat } from "./ui";
 
-export function CreditLineCard({ line, termSeconds }: { line: Line; termSeconds?: number }) {
-  const used = line.limitUsd > 0 ? Math.min(1, line.owedUsd / line.limitUsd) : 0;
+/** Where the agent's ERC-8004 ID is: locked while it owes, back with its owner, or kept after a default. */
+export function CollateralPill({ heldBy }: { heldBy: Line["collateral"]["heldBy"] }) {
   const collateral = {
     creditLine: { icon: <Lock size={13} />, label: "ID locked as collateral", tone: "signal" as const },
     owner: { icon: <LockOpen size={13} />, label: "ID with its owner", tone: "neutral" as const },
     treasury: { icon: <ShieldExclamationPoint size={13} />, label: "ID taken by the lender", tone: "outline" as const },
-  }[line.collateral.heldBy];
+  }[heldBy];
+  return (
+    <Pill tone={collateral.tone}>
+      {collateral.icon}
+      {collateral.label}
+    </Pill>
+  );
+}
+
+export function UsageBar({ line }: { line: Line }) {
+  const used = line.limitUsd > 0 ? Math.min(1, line.owedUsd / line.limitUsd) : 0;
+  return (
+    <div className="h-1.5 overflow-hidden rounded-full bg-ink-line" role="img" aria-label={`${Math.round(used * 100)}% of the limit in use`}>
+      <div className="h-full rounded-full bg-signal transition-[width] duration-700" style={{ width: `${used * 100}%` }} />
+    </div>
+  );
+}
+
+export function CreditLineCard({ line, termSeconds }: { line: Line; termSeconds?: number }) {
   const defaulted = line.status === "defaulted";
   return (
     <Card className="p-5">
@@ -21,10 +39,7 @@ export function CreditLineCard({ line, termSeconds }: { line: Line; termSeconds?
         </div>
         <div className="flex gap-2">
           {defaulted ? <Pill tone="outline">Defaulted</Pill> : <Pill tone="quiet">Active</Pill>}
-          <Pill tone={collateral.tone}>
-            {collateral.icon}
-            {collateral.label}
-          </Pill>
+          <CollateralPill heldBy={line.collateral.heldBy} />
         </div>
       </div>
       <div className="mt-5 grid grid-cols-3 gap-4">
@@ -32,11 +47,17 @@ export function CreditLineCard({ line, termSeconds }: { line: Line; termSeconds?
         <Stat label="Owed" value={usd(line.owedUsd)} sub={`includes the ${termSeconds ? "flat " : ""}5% fee`} accent={line.owedUsd > 0} />
         <Stat label="Available" value={usd(line.availableUsd)} sub={defaulted ? "closed after default" : "to borrow now"} />
       </div>
-      <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-ink-line" role="img" aria-label={`${Math.round(used * 100)}% of the limit in use`}>
-        <div className="h-full rounded-full bg-signal transition-[width] duration-700" style={{ width: `${used * 100}%` }} />
+      <div className="mt-5">
+        <UsageBar line={line} />
       </div>
       <div className="mt-3 flex flex-wrap justify-between gap-2 text-[12px] text-fog">
-        <span>{line.dueAt ? `Due ${date(line.dueAt)} · repaid automatically from income` : "Nothing owed"}</span>
+        <span>
+          {defaulted
+            ? "Defaulted: the lender kept the ID and closed the line"
+            : line.owedUsd > 0 && line.dueAt
+              ? `Due ${date(line.dueAt)} · repaid automatically from income`
+              : "Nothing owed"}
+        </span>
         <span className="font-mono">{line.loans.length} loan{line.loans.length === 1 ? "" : "s"} on this line</span>
       </div>
     </Card>
@@ -76,10 +97,54 @@ export function ComputeCard({ status, online }: { status: AgentStatus | null; on
   );
 }
 
+/** Any agent's AI budget, read straight from its compute account in the 0G PaymentVault. */
+export function VaultComputeCard({ compute }: { compute: Extract<Compute, { source: "0g-vault" }> | null }) {
+  return (
+    <Card className="flex flex-col p-5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-[13px] text-fog">
+          <Cpu size={15} /> AI compute
+        </div>
+        <Pill tone="neutral">0G mainnet</Pill>
+      </div>
+      {compute ? (
+        <>
+          <div className="mt-5">
+            <Stat label="Balance" value={usd(compute.balanceUsd)} sub={`${compute.balance0G.toFixed(4)} 0G in its compute account`} />
+          </div>
+          <p className="mt-4 text-[12px] text-fog">
+            Read live from the 0G PaymentVault. Only agents that publish their status also show jobs waiting.
+          </p>
+          <div className="mt-auto pt-4 text-[12px]">
+            <ExtLink href={compute.url}>account {short(compute.account)} on 0G</ExtLink>
+          </div>
+        </>
+      ) : (
+        <p className="mt-4 text-sm text-fog">Reading its compute account on 0G…</p>
+      )}
+    </Card>
+  );
+}
+
 type Step = { title: string; where: string; value: string; detail: string; url?: string; done: boolean };
 
-/** The six real steps of one loan cycle, each showing its latest on-chain event. */
-export function Loop({ events, line, status }: { events: ActivityEvent[]; line: Line; status: AgentStatus | null }) {
+/**
+ * The six real steps of one loan cycle, each showing its latest on-chain event. `reportsJobs` is true for an agent
+ * that publishes its own status (the demo agent); other agents' job counts aren't public.
+ */
+export function Loop({
+  events,
+  line,
+  status,
+  computeMode,
+  reportsJobs,
+}: {
+  events: ActivityEvent[];
+  line: Line;
+  status: AgentStatus | null;
+  computeMode?: Contracts["computeMode"];
+  reportsJobs: boolean;
+}) {
   const latest = (kind: ActivityEvent["kind"]) => events.find((e) => e.kind === kind);
   const payments = events.filter((e) => e.kind === "payment");
   const payment = payments[0];
@@ -88,7 +153,7 @@ export function Loop({ events, line, status }: { events: ActivityEvent[]; line: 
   const split = latest("split");
   const released = latest("released");
   const lastLoan = line.loans[line.loans.length - 1];
-  const zgLive = status?.computeMode === "0g";
+  const zgLive = (status?.computeMode ?? computeMode) === "0g";
   const served = status?.events.find((e) => e.kind === "served");
 
   const steps: Step[] = [
@@ -111,16 +176,16 @@ export function Loop({ events, line, status }: { events: ActivityEvent[]; line: 
     {
       title: "Loan lands in 0G compute",
       where: "relay to 0G PaymentVault",
-      value: deposit ? "Deposited" : lastLoan && !lastLoan.zgTx ? "Simulated" : "Waiting",
-      detail: deposit ? `loan #${deposit.drawId} · ${ago(deposit.at)}` : "real deposits start once the 0G tokens arrive",
+      value: deposit ? "Deposited" : lastLoan && !lastLoan.zgTx ? (zgLive ? "Depositing" : "Simulated") : "Waiting",
+      detail: deposit ? `loan #${deposit.drawId} · ${ago(deposit.at)}` : zgLive ? "the relay deposits each loan on 0G" : "simulated until 0G deposits go live",
       url: deposit?.url,
       done: Boolean(deposit),
     },
     {
       title: "Jobs served with AI",
-      where: zgLive ? "0G inference" : "placeholder AI for now",
-      value: status ? `${status.served} served` : "Agent offline",
-      detail: served ? served.detail : "every paid job is served or refunded",
+      where: !reportsJobs ? "the agent's own AI" : zgLive ? "0G inference" : "placeholder AI for now",
+      value: status ? `${status.served} served` : reportsJobs ? "Agent offline" : "Not reported",
+      detail: served ? served.detail : reportsJobs ? "every paid job is served or refunded" : "this agent doesn't publish its job count",
       done: Boolean(status?.served),
     },
     {
@@ -134,10 +199,15 @@ export function Loop({ events, line, status }: { events: ActivityEvent[]; line: 
     {
       title: "Loan repays itself",
       where: "debt on the splitter",
-      value: line.owedUsd === 0 ? "Repaid" : `${usd(line.owedUsd)} left`,
-      detail: line.owedUsd === 0 && released ? `ID returned to its owner ${ago(released.at)}` : "each split pays the lender first, then the ID is returned",
+      value: line.status === "defaulted" ? "Defaulted" : line.owedUsd === 0 ? "Repaid" : `${usd(line.owedUsd)} left`,
+      detail:
+        line.status === "defaulted"
+          ? `${usd(line.owedUsd)} unpaid · the lender kept the ID`
+          : line.owedUsd === 0 && released
+            ? `ID returned to its owner ${ago(released.at)}`
+            : "each split pays the lender first, then the ID is returned",
       url: line.owedUsd === 0 ? released?.url : undefined,
-      done: line.owedUsd === 0,
+      done: line.status === "active" && line.owedUsd === 0,
     },
   ];
 

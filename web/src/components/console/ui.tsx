@@ -1,4 +1,5 @@
-import { ArrowUpRight } from "lucide-react";
+import Link from "next/link";
+import { ArrowUpRight, ChevronRight } from "lucide-react";
 
 export function Card({ className = "", children }: { className?: string; children: React.ReactNode }) {
   return <section className={`rounded-2xl border border-ink-line bg-ink-2 ${className}`}>{children}</section>;
@@ -53,4 +54,25 @@ export function Skeleton({ className = "" }: { className?: string }) {
 
 export function LiveDot({ on }: { on: boolean }) {
   return <span className={`inline-block h-2 w-2 rounded-full ${on ? "live-dot bg-signal" : "bg-fog/50"}`} aria-hidden="true" />;
+}
+
+export function Crumbs({ items }: { items: { label: React.ReactNode; href?: string }[] }) {
+  return (
+    <nav aria-label="Breadcrumb" className="mb-5 flex flex-wrap items-center gap-1.5 text-[12.5px] text-fog">
+      {items.map((item, i) => (
+        <span key={i} className="flex items-center gap-1.5">
+          {i > 0 && <ChevronRight size={13} aria-hidden="true" />}
+          {item.href ? (
+            <Link href={item.href} className="transition hover:text-paper">
+              {item.label}
+            </Link>
+          ) : (
+            <span className="text-paper" aria-current="page">
+              {item.label}
+            </span>
+          )}
+        </span>
+      ))}
+    </nav>
+  );
 }

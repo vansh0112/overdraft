@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 export const API = (process.env.NEXT_PUBLIC_CONSOLE_API ?? "http://localhost:8000").replace(/\/$/, "");
 
@@ -12,6 +12,9 @@ export type Contracts = {
   usdc: string;
   bureau: { network: string; owner: string; schema: string };
   terms: { feeBps: number; termSeconds: number; graceSeconds: number };
+  demoAgentId: number;
+  demoOwner: string;
+  computeMode: "placeholder" | "0g";
 };
 
 export type Line = {
@@ -57,7 +60,29 @@ export type AgentSummary = {
   owedUsd?: number;
   availableUsd?: number;
   collateral?: Line["collateral"];
+  /** The owner's EVM address for agents with a line; the owner's Hedera account for refused ones. */
+  owner?: string;
+  agent?: string;
   reason?: string;
+  ownerAddress?: string;
+  agentAccount?: string;
+};
+
+export type Refusal = Required<Pick<AgentSummary, "agentId" | "reason" | "owner" | "ownerAddress" | "agentAccount">> & { status: "refused" };
+
+/** An agent's AI budget: the demo agent reports its own status; any other agent's is read from its 0G compute account. */
+export type Compute =
+  | { source: "agent"; account: string; status: AgentStatus | null }
+  | { source: "0g-vault"; account: string; balance0G: number; balanceUsd: number; url: string };
+
+export type OwnerView = {
+  address: string;
+  account: string | null;
+  accountUrl: string | null;
+  agents: Line[];
+  refused: Refusal[];
+  unenrolled: { agentId: number }[];
+  totals: { limitUsd: number; owedUsd: number; inDefaultUsd: number; availableUsd: number; idsLocked: number; idsLost: number };
 };
 
 export type ActivityKind = "limit" | "locked" | "loan" | "deposit" | "released" | "breach" | "default" | "split" | "payment";
@@ -141,15 +166,15 @@ export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 /** Fetches `path` now and every `intervalMs` while the tab is visible. A null path pauses it. */
 export function usePoll<T>(path: string | null, intervalMs: number) {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<ApiError | Error | null>(null);
-  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
-  const current = useRef(path);
+  // Results are kept with the path they belong to, so switching paths never shows the previous path's data.
+  const [result, setResult] = useState<{ path: string | null; data: T | null; error: Error | null; updatedAt: number | null }>({
+    path: null,
+    data: null,
+    error: null,
+    updatedAt: null,
+  });
 
   useEffect(() => {
-    current.current = path;
-    setData(null);
-    setError(null);
     if (!path) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -157,13 +182,9 @@ export function usePoll<T>(path: string | null, intervalMs: number) {
       if (document.visibilityState === "visible") {
         try {
           const value = await getJson<T>(path);
-          if (!stopped && current.current === path) {
-            setData(value);
-            setError(null);
-            setUpdatedAt(Date.now());
-          }
+          if (!stopped) setResult({ path, data: value, error: null, updatedAt: Date.now() });
         } catch (e) {
-          if (!stopped) setError(e as Error);
+          if (!stopped) setResult((last) => (last.path === path ? { ...last, error: e as Error } : { path, data: null, error: e as Error, updatedAt: null }));
         }
       }
       if (!stopped) timer = setTimeout(tick, intervalMs);
@@ -175,5 +196,6 @@ export function usePoll<T>(path: string | null, intervalMs: number) {
     };
   }, [path, intervalMs]);
 
-  return { data, error, updatedAt };
+  const current = path !== null && result.path === path ? result : null;
+  return { data: current?.data ?? null, error: current?.error ?? null, updatedAt: current?.updatedAt ?? null };
 }

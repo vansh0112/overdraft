@@ -23,9 +23,10 @@ export function Logo({ tone = "ink" }: { tone?: "ink" | "paper" }) {
 }
 
 const links = [
-  { href: "/console", label: "Console" },
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/agents", label: "Agents" },
   { href: "/docs", label: "Docs" },
-  { href: "https://github.com/vansh0112/overdraft", label: "GitHub" },
+  { href: "https://github.com/vansh0112/overdraft", label: "GitHub", wide: true },
 ];
 
 /** Site navigation. `surface` is the background it sits on. */
@@ -35,13 +36,17 @@ export function Nav({ surface = "paper", children }: { surface?: "paper" | "ink"
     <header className={onInk ? "border-b border-ink-line bg-ink text-paper" : "border-b border-paper-line bg-paper text-ink"}>
       <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between gap-6 px-4 sm:px-6">
         <Logo tone={onInk ? "paper" : "ink"} />
-        <nav className="flex items-center gap-5 text-sm">
-          {children}
+        <nav className="flex items-center gap-4 text-sm sm:gap-5">
           {links.map((l) => (
-            <Link key={l.href} href={l.href} className={onInk ? "text-fog transition hover:text-paper" : "text-slate transition hover:text-ink"}>
+            <Link
+              key={l.href}
+              href={l.href}
+              className={`${l.wide ? "hidden sm:inline " : ""}${onInk ? "text-fog transition hover:text-paper" : "text-slate transition hover:text-ink"}`}
+            >
               {l.label}
             </Link>
           ))}
+          {children}
         </nav>
       </div>
     </header>

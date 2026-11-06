@@ -1,5 +1,7 @@
 /** Public addresses of the current deployment (mirrors deployments/hedera-testnet.json; update both on redeploy). */
 export const DEPLOYMENTS = {
+  /** The agent the live demo runs on (AGENT_CREDIT_ID in .env). */
+  demoAgentId: 140,
   hedera: {
     network: "Hedera testnet (chain 296)",
     creditLine: { id: "0.0.11330129", evm: "0x16F7ffEa40A64632833dFfF6BE9b4E16C7F893EB" },

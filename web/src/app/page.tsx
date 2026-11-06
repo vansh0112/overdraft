@@ -2,6 +2,9 @@ import Link from "next/link";
 import { Footer, Nav } from "@/components/brand";
 import { BudgetChart } from "@/components/landing/BudgetChart";
 import { LiveStrip } from "@/components/landing/LiveStrip";
+import { DEPLOYMENTS } from "@/lib/deployments";
+
+const demo = `/agents/${DEPLOYMENTS.demoAgentId}`;
 
 const steps = [
   {
@@ -57,8 +60,8 @@ export default function Home() {
               loan back, automatically.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Link href="/console" className="rounded-xl bg-ink px-5 py-3 text-[15px] font-semibold text-paper transition hover:bg-ink-3">
-                Open the live console
+              <Link href={demo} className="rounded-xl bg-ink px-5 py-3 text-[15px] font-semibold text-paper transition hover:bg-ink-3">
+                See the live demo
               </Link>
               <a href="#how" className="rounded-xl border border-ink px-5 py-3 text-[15px] font-semibold text-ink transition hover:bg-paper-2">
                 How it works
@@ -177,11 +180,14 @@ export default function Home() {
               <h2 className="font-serif text-[40px] leading-none sm:text-[52px]">
                 Watch it <em className="text-signal">borrow and repay</em>, live.
               </h2>
-              <p className="mt-4 max-w-xl text-[16px] text-fog">Every number in the console is read from Hedera and Arkiv, and from 0G once its loans go live. Every step links to its transaction.</p>
+              <p className="mt-4 max-w-xl text-[16px] text-fog">Every number on the dashboards is read from Hedera and Arkiv, and from 0G once its loans go live. Every step links to its transaction.</p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Link href="/console" className="rounded-xl bg-signal px-5 py-3 text-[15px] font-semibold text-ink transition hover:brightness-110">
-                Open the console
+              <Link href={demo} className="rounded-xl bg-signal px-5 py-3 text-[15px] font-semibold text-ink transition hover:brightness-110">
+                Open the live demo
+              </Link>
+              <Link href="/dashboard" className="rounded-xl border border-ink-line px-5 py-3 text-[15px] font-semibold text-paper transition hover:border-fog">
+                Owner dashboard
               </Link>
               <Link href="/docs" className="rounded-xl border border-ink-line px-5 py-3 text-[15px] font-semibold text-paper transition hover:border-fog">
                 Read the docs

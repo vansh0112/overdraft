@@ -17,12 +17,12 @@ function readSaved(): string {
 
 /** Starts real demo actions on testnet. The API checks the password; it is kept only for this browser tab. */
 export function DemoControls() {
-  const [password, setPassword] = useState("");
+  // Rendered only in the browser (after the page knows it's the demo agent), so the saved password can be read at once.
+  const [password, setPassword] = useState(readSaved);
   const [message, setMessage] = useState<string | null>(null);
   const [run, setRun] = useState<DemoRun | null>(null);
   const [enabled, setEnabled] = useState<boolean | null>(null);
 
-  useEffect(() => setPassword(readSaved()), []);
   useEffect(() => {
     getJson<{ demoControls: boolean }>("/api/health")
       .then((h) => setEnabled(h.demoControls))

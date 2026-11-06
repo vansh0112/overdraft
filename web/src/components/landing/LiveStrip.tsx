@@ -22,7 +22,7 @@ export function LiveStrip() {
     { label: "agent ID", value: line.collateral.heldBy === "creditLine" ? "locked" : line.collateral.heldBy === "owner" ? "with owner" : "taken" },
   ];
   return (
-    <Link href="/console" className="group mt-10 block rounded-2xl border border-paper-line bg-paper transition hover:border-ink">
+    <Link href={`/agents/${line.agentId}`} className="group mt-10 block rounded-2xl border border-paper-line bg-paper transition hover:border-ink">
       <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
         <div className="flex items-center gap-2 text-[13px] text-slate">
           <span className="live-dot inline-block h-2 w-2 rounded-full bg-signal" aria-hidden="true" />
@@ -36,7 +36,7 @@ export function LiveStrip() {
             </div>
           ))}
         </div>
-        <span className="text-[13px] text-ink underline-offset-4 group-hover:underline">Open the console →</span>
+        <span className="text-[13px] text-ink underline-offset-4 group-hover:underline">Open the live demo →</span>
       </div>
     </Link>
   );
