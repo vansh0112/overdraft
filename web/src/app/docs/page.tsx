@@ -1,0 +1,250 @@
+import type { Metadata } from "next";
+import { Footer, Nav } from "@/components/brand";
+import { DEPLOYMENTS, hashscan } from "@/lib/deployments";
+
+export const metadata: Metadata = {
+  title: "Docs",
+  description: "How Overdraft lends AI compute to agents: underwriting, loans on 0G, repayment from x402 income on Hedera, ERC-8004 collateral and the credit bureau on Arkiv.",
+};
+
+const sections = [
+  ["overview", "Overview"],
+  ["loan", "How a loan works"],
+  ["underwriting", "Underwriting"],
+  ["collateral", "Collateral and defaults"],
+  ["watcher", "The watcher"],
+  ["bureau", "Credit bureau on Arkiv"],
+  ["addresses", "Contracts and addresses"],
+  ["run", "Run it yourself"],
+  ["limits", "Limits and trust"],
+] as const;
+
+function H2({ id, children }: { id: string; children: React.ReactNode }) {
+  return (
+    <h2 id={id} className="scroll-mt-24 font-serif text-[38px] leading-tight">
+      {children}
+    </h2>
+  );
+}
+
+function P({ children }: { children: React.ReactNode }) {
+  return <p className="mt-4 text-[16px] leading-[1.7] text-slate">{children}</p>;
+}
+
+function Code({ children }: { children: string }) {
+  return <pre className="mt-4 overflow-x-auto rounded-xl bg-ink p-4 font-mono text-[13px] leading-relaxed text-paper">{children}</pre>;
+}
+
+function C({ children }: { children: React.ReactNode }) {
+  return <code className="rounded bg-paper-2 px-1.5 py-0.5 font-mono text-[13.5px] text-ink">{children}</code>;
+}
+
+function Table({ head, rows }: { head: string[]; rows: React.ReactNode[][] }) {
+  return (
+    <div className="mt-5 overflow-x-auto rounded-xl border border-paper-line">
+      <table className="w-full min-w-[560px] text-left text-[14px]">
+        <thead className="bg-paper-2 text-[12.5px] text-slate">
+          <tr>{head.map((h) => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}</tr>
+        </thead>
+        <tbody className="divide-y divide-paper-line">
+          {rows.map((row, i) => (
+            <tr key={i}>{row.map((cell, j) => <td key={j} className="px-4 py-2.5 align-top text-ink">{cell}</td>)}</tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const A = ({ href, children }: { href: string; children: React.ReactNode }) => (
+  <a href={href} target="_blank" rel="noreferrer" className="font-mono text-[13.5px] text-ink underline decoration-paper-line underline-offset-4 hover:decoration-ink">
+    {children}
+  </a>
+);
+
+export default function Docs() {
+  const d = DEPLOYMENTS;
+  return (
+    <div className="flex min-h-full flex-1 flex-col bg-paper text-ink">
+      <Nav surface="paper" />
+      <main className="mx-auto grid w-full max-w-[1200px] flex-1 gap-12 px-4 py-14 sm:px-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <aside className="hidden lg:block">
+          <nav className="sticky top-8 text-[14px]" aria-label="Docs sections">
+            <div className="font-mono text-[11px] uppercase tracking-[0.1em] text-slate">Docs</div>
+            <ul className="mt-4 space-y-2.5">
+              {sections.map(([id, label]) => (
+                <li key={id}>
+                  <a href={`#${id}`} className="text-slate transition hover:text-ink">{label}</a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </aside>
+
+        <article className="max-w-[760px]">
+          <div className="font-mono text-[12px] uppercase tracking-[0.1em] text-slate">Documentation</div>
+          <h1 className="mt-4 font-serif text-[56px] leading-none">How Overdraft works</h1>
+
+          <div className="mt-12">
+            <H2 id="overview">Overview</H2>
+            <P>
+              AI agents that sell their work pay for their own AI compute, and they pay before each job. When paid orders arrive faster than
+              the agent&apos;s balance, it has to turn customers away. Overdraft gives the agent a credit line: it borrows the shortfall as
+              compute, serves every job, and repays from the income those jobs bring in.
+            </P>
+            <P>
+              Three networks do one job each. <strong className="text-ink">Hedera</strong> carries the money: customers pay with x402 in
+              USDC, and the credit line and income splitter are contracts there. <strong className="text-ink">0G</strong> is where loans land,
+              in the agent&apos;s compute account, where they can only be spent on inference. <strong className="text-ink">Arkiv</strong> holds
+              the public credit history.
+            </P>
+          </div>
+
+          <div className="mt-12">
+            <H2 id="loan">How a loan works</H2>
+            <Table
+              head={["Step", "What happens", "Where"]}
+              rows={[
+                ["1", "Customers pay per job with x402. Payments go to the agent's IncomeSplitter, not its wallet.", "Hedera"],
+                ["2", "The agent sees the jobs waiting cost more than its compute balance and requests a loan for the gap.", "CreditLine, Hedera"],
+                ["3", "The relay deposits the loan into the agent's 0G compute account and records the 0G transaction on Hedera.", "PaymentVault, 0G"],
+                ["4", "Every job is served with AI; each response carries its request ID and cost.", "0G Compute"],
+                ["5", "Anyone can trigger a split: the lender's share goes first (up to the debt), a share tops up compute, the rest goes to the owner.", "IncomeSplitter, Hedera"],
+                ["6", "When the debt reaches zero the agent's ID is returned to its owner.", "CreditLine, Hedera"],
+              ]}
+            />
+            <P>
+              Every loan carries a flat 5% fee, fixed when the contract was deployed. The agent decides when to borrow and signs its own loan
+              requests; the contract refuses anything over its limit.
+            </P>
+          </div>
+
+          <div className="mt-12">
+            <H2 id="underwriting">Underwriting</H2>
+            <P>
+              Income can be faked: an owner can fund a few wallets and have them pay their own agent. So before counting a customer&apos;s
+              payments, the underwriter follows that customer&apos;s money back on Hedera&apos;s public mirror node, up to three hops.
+            </P>
+            <Table
+              head={["Rule", "Value"]}
+              rows={[
+                ["Money that traces back to the agent or its owner", "counts for nothing"],
+                ["Money the agent sent out that came back as payment", "counts for nothing"],
+                ["Most any one customer can count for", "40% of verified income"],
+                ["Independent customers needed", "at least 3"],
+                ["Margin each job must earn over its AI cost", "at least 20%"],
+                ["Limit", "50% of the income that counts, at most $5 for a new agent"],
+              ]}
+            />
+            <P>
+              The decision, with every fact it used and a short memo, is written to Arkiv. The keccak-256 hash of that record is stored with
+              the limit on Hedera (<C>LimitSet.decisionHash</C>), so anyone can check the published reasoning is the one behind the limit.
+              The rules decide; a 0G model can be used to word the memo.
+            </P>
+          </div>
+
+          <div className="mt-12">
+            <H2 id="collateral">Collateral and defaults</H2>
+            <P>
+              Each agent has an ERC-8004 identity, an NFT that carries its name and reputation. The owner approves the CreditLine once. The
+              first loan of a debt cycle moves the ID into the CreditLine and starts a 7-day repayment term; when the debt reaches zero, anyone
+              can return it to the owner, and the sweeper does so automatically.
+            </P>
+            <P>
+              A line defaults if the debt is still owed 24 hours after the term ends (anyone can call <C>markOverdue</C>), or if the watcher
+              reports a breach. On default the ID goes to the lender&apos;s treasury and the agent can&apos;t borrow again.
+            </P>
+          </div>
+
+          <div className="mt-12">
+            <H2 id="watcher">The watcher</H2>
+            <P>For every line with debt outstanding, every minute:</P>
+            <ul className="mt-4 list-disc space-y-2 pl-5 text-[16px] leading-[1.7] text-slate">
+              <li>It asks the agent&apos;s paid endpoint for its price, like a customer would, and checks the x402 payTo is the agent&apos;s splitter. Two mismatches in a row are a breach.</li>
+              <li>It watches 0G for <C>CreditTransferred</C> out of the agent&apos;s compute account, which would move borrowed compute out of reach.</li>
+              <li>It marks debts overdue after the due date plus the grace period.</li>
+            </ul>
+          </div>
+
+          <div className="mt-12">
+            <H2 id="bureau">Credit bureau on Arkiv</H2>
+            <P>
+              Each fact is one Arkiv entity owned by the bureau wallet <C>{d.arkiv.bureau}</C>, under the schema <C>{d.arkiv.schema}</C>.
+              Records expire on their own, so old history ages out like a credit report.
+            </P>
+            <Table
+              head={["Record", "Written when", "Kept for"]}
+              rows={[
+                ["underwriting / refusal", "the underwriter decides (full decision record)", "90 days"],
+                ["decision", "a limit is set on Hedera", "90 days"],
+                ["loan", "the agent borrows", "180 days"],
+                ["disbursed", "the loan reaches 0G compute", "180 days"],
+                ["repayment", "a split pays the lender", "90 days"],
+                ["repaid", "the debt is cleared and the ID returned", "180 days"],
+                ["default", "a line defaults, with the reason", "90 days"],
+              ]}
+            />
+            <P>Anyone can read an agent&apos;s history with Arkiv&apos;s query API, filtering on the bureau wallet so nobody else&apos;s records are mixed in:</P>
+            <Code>{`arkiv.schema = str('overdraft.bureau')
+  AND $owner = addr(${d.arkiv.bureau})
+  AND agentId = u64(140)`}</Code>
+          </div>
+
+          <div className="mt-12">
+            <H2 id="addresses">Contracts and addresses</H2>
+            <Table
+              head={["What", "Address", "Network"]}
+              rows={[
+                ["CreditLine", <A key="cl" href={hashscan(d.hedera.creditLine.id)}>{d.hedera.creditLine.id}</A>, "Hedera testnet"],
+                ["IncomeSplitter (agent #140)", <A key="sp" href={hashscan(d.hedera.splitter.id)}>{d.hedera.splitter.id}</A>, "Hedera testnet"],
+                ["ERC-8004 IdentityRegistry", <span key="id" className="font-mono text-[13px]">{d.hedera.identityRegistry}</span>, "Hedera testnet"],
+                ["USDC", <span key="usdc" className="font-mono text-[13px]">{d.hedera.usdc}</span>, "Hedera testnet"],
+                ["PaymentVault", <A key="pv" href={`https://chainscan.0g.ai/address/${d.zg.paymentVault}`}>{d.zg.paymentVault}</A>, "0G mainnet"],
+                ["Bureau wallet", <span key="bw" className="font-mono text-[13px]">{d.arkiv.bureau}</span>, "Arkiv Rabdi"],
+              ]}
+            />
+          </div>
+
+          <div className="mt-12">
+            <H2 id="run">Run it yourself</H2>
+            <P>
+              The code is at <A href="https://github.com/vansh0112/overdraft">github.com/vansh0112/overdraft</A>: Solidity contracts, a
+              Python backend, and a TypeScript x402 gateway (the Hedera x402 package is TypeScript-only). Copy <C>.env.example</C> to{" "}
+              <C>.env</C> and use test wallets only.
+            </P>
+            <Code>{`# contracts and the agent's identity (Hedera testnet)
+python -m overdraft.cli deploy-credit-line
+python -m overdraft.cli deploy-splitter
+python -m overdraft.cli register-agent --owner OWNER
+python -m overdraft.underwriter AGENT_ID AGENT_ACCOUNT --apply
+
+# services
+npm --prefix gateway run gateway              # x402 endpoint
+uvicorn overdraft.agent.app:app --port 5001   # the borrowing agent
+python -m overdraft.sweeper                   # splits income, returns IDs
+python -m overdraft.relay                     # loans into 0G compute
+python -m overdraft.bureau watch              # credit history to Arkiv
+python -m overdraft.watcher                   # breaches and overdue debts
+uvicorn overdraft.console:app --port 8000     # data for this site
+
+# a rush of paid jobs
+npm --prefix gateway run rush -- 8`}</Code>
+          </div>
+
+          <div className="mt-12">
+            <H2 id="limits">Limits and trust</H2>
+            <ul className="mt-4 list-disc space-y-2.5 pl-5 text-[16px] leading-[1.7] text-slate">
+              <li>The relay that moves loans from Hedera to 0G is run by the lender. Its deposits are capped per transfer and per day, and every one is recorded on Hedera.</li>
+              <li>A payTo redirect is detected and punished, not prevented: an endpoint could show the watcher a different address than its customers.</li>
+              <li>The money trail can&apos;t see through an exchange or more than three hops, which is why new agents start with small limits.</li>
+              <li>0G&apos;s PaymentVault is upgradeable by 0G, and <C>transferCredit</C> can&apos;t be blocked; the watcher treats a transfer out as a breach.</li>
+              <li>On testnet, the demo customers were funded from the lender&apos;s test wallet; the underwriter treats the lender&apos;s wallets as outside money.</li>
+              <li>The 0G side runs in simulation until the lender wallet holds 0G: deposits are checked against the live PaymentVault without being sent.</li>
+            </ul>
+          </div>
+        </article>
+      </main>
+      <Footer surface="paper" />
+    </div>
+  );
+}
