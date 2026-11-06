@@ -102,7 +102,7 @@ export function ComputeCard({ status, online }: { status: AgentStatus | null; on
         <div className="flex items-center gap-2 text-[13px] text-fog">
           <Cpu size={15} /> AI compute
         </div>
-        <Pill tone={live ? "neutral" : "quiet"}>{live ? "0G mainnet" : "Placeholder until 0G tokens"}</Pill>
+        <Pill tone={live ? "neutral" : "quiet"}>{live ? "0G mainnet" : "0G simulated"}</Pill>
       </div>
       <div className="mt-5 grid grid-cols-2 gap-4">
         <Stat label="Balance" value={usd(status.balanceUsd)} sub={`covers ${status.coversJobs} job${status.coversJobs === 1 ? "" : "s"}`} />
@@ -194,14 +194,28 @@ export function Loop({
     {
       title: "Loan lands in 0G compute",
       where: "relay to 0G PaymentVault",
-      value: deposit ? "Deposited" : lastLoan && !lastLoan.zgTx ? (zgLive ? "Depositing" : "Simulated") : "Waiting",
-      detail: deposit ? `loan #${deposit.drawId} · ${ago(deposit.at)}` : zgLive ? "the relay deposits each loan on 0G" : "simulated until 0G deposits go live",
+      value: deposit?.simulated
+        ? `Simulated ${deposit.amount0G?.toFixed(3)} 0G`
+        : deposit
+          ? "Deposited"
+          : lastLoan && !lastLoan.zgTx
+            ? zgLive
+              ? "Depositing"
+              : "Simulated"
+            : "Waiting",
+      detail: deposit?.simulated
+        ? `dry run on 0G's live PaymentVault: compute ${deposit.balanceBefore0G?.toFixed(3)} → ${deposit.balanceAfter0G?.toFixed(3)} 0G · ${ago(deposit.at)}`
+        : deposit
+          ? `loan #${deposit.drawId} · ${ago(deposit.at)}`
+          : zgLive
+            ? "the relay deposits each loan on 0G"
+            : "a dry run on 0G's live PaymentVault; no 0G is spent",
       url: deposit?.url,
       done: Boolean(deposit),
     },
     {
       title: "Jobs served with AI",
-      where: !reportsJobs ? "the agent's own AI" : zgLive ? "0G inference" : "placeholder AI for now",
+      where: !reportsJobs ? "the agent's own AI" : zgLive ? "0G inference" : "simulated AI",
       value: status ? `${status.served} served` : reportsJobs ? "Agent offline" : "Not reported",
       detail: served ? served.detail : reportsJobs ? "every paid job is served or refunded" : "this agent doesn't publish its job count",
       done: Boolean(status?.served),

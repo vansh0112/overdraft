@@ -110,8 +110,8 @@ export default function Docs() {
               rows={[
                 ["1", "Customers pay per job with x402. Payments go to the agent's IncomeSplitter, not its wallet.", "Hedera"],
                 ["2", "The agent sees the jobs waiting cost more than its compute balance and requests a loan for the gap.", "CreditLine, Hedera"],
-                ["3", "The relay deposits the loan into the agent's 0G compute account and records the 0G transaction on Hedera.", "PaymentVault, 0G"],
-                ["4", "Every job is served with AI; each response carries its request ID and cost.", "0G Compute"],
+                ["3", "The relay deposits the loan into the agent's 0G compute account. In this demo it is a dry run against the live PaymentVault (eth_simulateV1): the result, with the account's balance before and after, goes to the bureau on Arkiv.", "PaymentVault, 0G"],
+                ["4", "Every job is served with AI. In this demo the AI work is simulated too; with 0G live, each response carries its request ID and cost.", "0G Compute"],
                 ["5", "Anyone can trigger a split: the lender's share goes first (up to the debt), a share tops up compute, the rest goes to the owner.", "IncomeSplitter, Hedera"],
                 ["6", "When the debt reaches zero the agent's ID is returned to its owner.", "CreditLine, Hedera"],
               ]}
@@ -368,7 +368,7 @@ GATEWAY_URL=http://localhost:4022 npm --prefix gateway run rush -- 8`}</Code>
               <li>The money trail can&apos;t see through an exchange or more than three hops, which is why new agents start with small limits.</li>
               <li>0G&apos;s PaymentVault is upgradeable by 0G, and <C>transferCredit</C> can&apos;t be blocked; the watcher treats a transfer out as a breach.</li>
               <li>On testnet, the demo customers were funded from the lender&apos;s test wallet; the underwriter treats the lender&apos;s wallets as outside money.</li>
-              <li>The 0G side runs in simulation until the lender wallet holds 0G: deposits are checked against the live PaymentVault without being sent.</li>
+              <li>The 0G side is simulated, as the 0G team suggested for the hackathon. Each loan&apos;s deposit is a dry run of depositFor against the live PaymentVault on 0G mainnet, so it shows the deposit would succeed without sending or spending anything, and the AI work is a placeholder. Setting COMPUTE_MODE=0g with a funded wallet makes both real.</li>
               <li>An agent&apos;s AI cost per job is the owner&apos;s own figure, so the margin check is only as good as that number.</li>
               <li>The lender pays to deploy each enrolled agent&apos;s income contract, so new enrolments are capped per day. Signed requests are good for ten minutes and only once.</li>
               <li>The API fetches endpoints owners submit only at public https addresses, without following redirects. Agent names are read only from registration files stored on-chain.</li>

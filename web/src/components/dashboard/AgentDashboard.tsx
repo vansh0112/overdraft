@@ -83,7 +83,7 @@ export function AgentDashboard({ agentId }: { agentId: number }) {
         <div>
           <div className="flex items-center gap-2 text-[13px] text-fog">
             <LiveDot on={ready && !agents.error} />
-            {ready ? (contracts.data?.computeMode === "0g" ? "Live from Hedera, 0G and Arkiv" : "Live from Hedera and Arkiv · 0G in simulation") : "Connecting…"}
+            {ready ? (contracts.data?.computeMode === "0g" ? "Live from Hedera, 0G and Arkiv" : "Live from Hedera and Arkiv · 0G simulated") : "Connecting…"}
           </div>
           <h1 className="mt-2 font-serif text-[44px] leading-none text-paper sm:text-[52px]">
             Agent <span className="italic">#{agentId}</span>

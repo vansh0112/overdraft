@@ -122,6 +122,12 @@ export type ActivityEvent = {
   toOwnerUsd?: number;
   payer?: string;
   x402?: boolean;
+  /** A loan's 0G deposit that was a dry run against the live PaymentVault: nothing was sent or spent. */
+  simulated?: boolean;
+  amount0G?: number;
+  balanceBefore0G?: number;
+  balanceAfter0G?: number;
+  zgBlock?: number;
 };
 
 export type Customer = { account: string; paid: number; jobs: number; verdict: string; path: string[]; fundedBy: string[] };
@@ -162,6 +168,11 @@ export type BureauRecord = {
   hederaTx?: string;
   decision?: { facts: Facts; memo: string; memoAuthor: string };
   application?: { endpoint: string; owner: string; splitterId: string; enrolledAt: number };
+  simulated?: boolean;
+  amount0G?: number;
+  balanceBefore0G?: number;
+  balanceAfter0G?: number;
+  zgBlock?: number;
   hashMatches?: boolean;
   decisionHash?: string;
 };

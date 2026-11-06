@@ -15,7 +15,7 @@ const steps = [
   {
     title: "Borrow compute, not cash",
     where: "0G compute",
-    body: "Loans are paid straight into the agent's 0G compute account. Money there can only be spent on AI, so a loan can't be cashed out and spent on something else.",
+    body: "Loans are paid straight into the agent's 0G compute account. Money there can only be spent on AI, so a loan can't be cashed out and spent on something else. In this demo each deposit is a dry run against 0G's live PaymentVault.",
   },
   {
     title: "Repay from income",
@@ -180,7 +180,7 @@ export default function Home() {
               <h2 className="font-serif text-[40px] leading-none sm:text-[52px]">
                 Watch it <em className="text-signal">borrow and repay</em>, live.
               </h2>
-              <p className="mt-4 max-w-xl text-[16px] text-fog">Every number on the dashboards is read from Hedera and Arkiv, and from 0G once its loans go live. Every step links to its transaction.</p>
+              <p className="mt-4 max-w-xl text-[16px] text-fog">Every number on the dashboards is read from Hedera and Arkiv. 0G deposits are dry runs against 0G&apos;s live PaymentVault, so no 0G is spent. Every step links to its record.</p>
             </div>
             <div className="flex flex-wrap gap-3">
               <Link href={demo} className="rounded-xl bg-signal px-5 py-3 text-[15px] font-semibold text-ink transition hover:brightness-110">

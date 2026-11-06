@@ -53,7 +53,7 @@ export function Activity({ events, loading }: { events: ActivityEvent[] | null; 
             </div>
             <div className="shrink-0 text-right text-[12px]">
               <div className="text-fog">{ago(e.at)}</div>
-              <ExtLink href={e.url} className="mt-0.5">{e.kind === "deposit" ? "0G tx" : "tx"}</ExtLink>
+              <ExtLink href={e.url} className="mt-0.5">{e.kind === "deposit" ? (e.simulated ? "PaymentVault" : "0G tx") : "tx"}</ExtLink>
             </div>
           </li>
         ))}

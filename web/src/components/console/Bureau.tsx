@@ -31,11 +31,13 @@ export function Bureau({ records, owner, loading }: { records: BureauRecord[] | 
         {loading && !records && Array.from({ length: 4 }, (_, i) => <li key={i} className="px-5 py-3"><Skeleton className="h-6" /></li>)}
         {records && records.length === 0 && <li className="px-5 py-6 text-sm text-fog">No records for this agent yet.</li>}
         {records?.map((r) => {
-          const amount = r.kind === "refusal" ? undefined : r.amountUsd ?? r.owedUsd ?? r.limitUsd;
+          const amount = r.kind === "refusal" || r.simulated ? undefined : r.amountUsd ?? r.owedUsd ?? r.limitUsd;
           return (
             <li key={r.key} className="flex items-center gap-3 px-5 py-2.5 text-[13px]">
-              <span className={`w-28 shrink-0 ${r.kind === "default" || r.kind === "refusal" ? "text-signal" : "text-paper"}`}>{KINDS[r.kind] ?? r.kind}</span>
-              <span className="tabular w-16 shrink-0 font-mono text-paper">{amount !== undefined ? usd(amount) : ""}</span>
+              <span className={`w-28 shrink-0 ${r.kind === "default" || r.kind === "refusal" ? "text-signal" : "text-paper"}`}>{r.simulated ? "Into 0G, simulated" : KINDS[r.kind] ?? r.kind}</span>
+              <span className="tabular w-16 shrink-0 font-mono text-paper">
+                {r.simulated ? `${r.amount0G?.toFixed(3)} 0G` : amount !== undefined ? usd(amount) : ""}
+              </span>
               <span className="min-w-0 flex-1 truncate text-fog">{r.reason ?? (r.drawId !== undefined ? `loan #${r.drawId}` : "")}</span>
               <span className="shrink-0 text-fog">expires in {Math.round(r.expiresInDays)}d</span>
               {r.hederaTx && <ExtLink href={r.hederaTx} className="shrink-0">tx</ExtLink>}
