@@ -13,6 +13,7 @@ before every request, not only when the URL is submitted.
 import base64
 import ipaddress
 import json
+import re
 import socket
 from urllib.parse import urlsplit
 
@@ -23,6 +24,8 @@ from .config import optional
 MAX_URL_LENGTH = 200
 TIMEOUT_SECONDS = 10
 MAX_TERMS_BYTES = 64 * 1024
+SANDBOX_TIMEOUT_SECONDS = 25  # its first answer for a new agent looks the agent up on Hedera
+SANDBOX_PATH = re.compile(r"/sandbox/\d{1,9}/translate")
 
 
 def allow_local() -> bool:
@@ -53,16 +56,29 @@ def check_url(url: str) -> str:
     return url
 
 
+def own_sandbox(url: str) -> str | None:
+    """This server's own sandbox endpoint (see console.sandbox), reached on this machine instead of out through the
+    internet and back. PUBLIC_API_DOMAIN, else the domain Railway gives the service, says which host is ours."""
+    domain = (optional("PUBLIC_API_DOMAIN") or optional("RAILWAY_PUBLIC_DOMAIN") or "").lower()
+    parts = urlsplit(url)
+    if domain and parts.scheme == "https" and parts.hostname == domain and parts.port in (None, 443) and SANDBOX_PATH.fullmatch(parts.path) and not parts.query:
+        return f"http://127.0.0.1:{optional('GATEWAY_PORT') or 4021}{parts.path}"
+    return None
+
+
 def quote(url: str, *, trusted: bool = False) -> dict:
     """The terms an unpaid request gets: {"accepts": [...], "payTo": {accounts}}. ValueError if it isn't x402.
 
     `trusted` is for endpoints the operator configured (such as the demo agent's, on this machine); every
     endpoint an owner submitted goes through check_url.
     """
-    if not trusted:
+    target, timeout = url, TIMEOUT_SECONDS
+    if local := own_sandbox(url):
+        target, timeout = local, SANDBOX_TIMEOUT_SECONDS
+    elif not trusted:
         check_url(url)
     try:
-        response = requests.post(url, json={}, timeout=TIMEOUT_SECONDS, allow_redirects=False, stream=True)
+        response = requests.post(target, json={}, timeout=timeout, allow_redirects=False, stream=True)
     except requests.RequestException as error:
         raise ValueError(f"the endpoint didn't answer ({type(error).__name__})") from error
     with response:
