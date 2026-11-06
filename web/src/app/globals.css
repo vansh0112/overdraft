@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/* Overdraft brand: two main colours (ink, paper) and one accent (signal), used sparingly. */
+@theme {
+  --color-ink: #0f1a2a;
+  --color-ink-2: #16233a;
+  --color-ink-3: #1f2e47;
+  --color-ink-line: #2a3a52;
+  --color-paper: #f3eee4;
+  --color-paper-2: #ebe4d6;
+  --color-paper-line: #d9d1c2;
+  --color-signal: #ff5b2e;
+  --color-fog: #9aa6b6; /* secondary text on ink */
+  --color-slate: #4a5566; /* secondary text on paper */
+}
+
+@theme inline {
+  --font-serif: var(--font-instrument-serif), Georgia, serif;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+}
+
+html {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+}
+
+::selection {
+  background: var(--color-signal);
+  color: var(--color-ink);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.live-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot { animation: none; }
+}
