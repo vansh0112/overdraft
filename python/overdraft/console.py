@@ -1,8 +1,9 @@
 """Console API: the read-only data behind the Overdraft console, plus password-protected demo controls.
 
 Everything it returns is read from public sources (the CreditLine and splitters on Hedera, the mirror
-node, the bureau on Arkiv) or from the agent's public status, so the console never shows a number the
-chain can't back. Demo controls start a paid rush or re-run the fake-earnings check; they need the
+node, the PaymentVault on 0G, the bureau on Arkiv) or from the agent's public status, so the console
+never shows a number the chain can't back. Owners are looked up by wallet address or Hedera account,
+with no sign-in: everything about an owner's agents is public on-chain. Demo controls start a paid rush or re-run the fake-earnings check; they need the
 CONSOLE_DEMO_PASSWORD in an x-demo-password header and run one at a time.
 
     uvicorn overdraft.console:app --port 8000
@@ -10,9 +11,11 @@ CONSOLE_DEMO_PASSWORD in an x-demo-password header and run one at a time.
 
 import hmac
 import json
+import re
 import subprocess
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from functools import lru_cache, wraps
@@ -28,7 +31,7 @@ from . import arkiv, zg
 from .bureau import SCHEMA, decode, new_logs
 from .cli import IDENTITY_ABI, IDENTITY_REGISTRY, STATUS, deployed
 from .config import ROOT, optional, read_deployments, required
-from .hedera import MIRROR, contract_id_of, hashscan_contract, hashscan_tx, token_balance, web3
+from .hedera import MIRROR, contract_id_of, hashscan_contract, hashscan_tx, long_zero_address, token_balance, web3
 from .solidity import load_abi
 
 USDC = 1_000_000
@@ -36,6 +39,10 @@ X402_FEE_PAYERS = {"0.0.9185802"}  # the x402.org facilitator pays the fees of x
 CACHE_SECONDS = float(optional("CONSOLE_CACHE_SECONDS") or 5)
 DEMO_PASSWORD = optional("CONSOLE_DEMO_PASSWORD") or ""
 ORIGINS = [o.strip() for o in (optional("CONSOLE_ALLOWED_ORIGINS") or "http://localhost:3000").split(",") if o.strip()]
+ACCOUNT_ID = re.compile(r"0\.0\.\d{1,12}")
+EVM_ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
+REGISTER_SELECTOR = "0xf2c298be"  # register(string): mints a new ERC-8004 ID to the caller
+OWNER_LOOKUPS_PER_MINUTE = 30
 
 def warm_up() -> None:
     """Fills the cache once at start, so the first visitor doesn't wait for the chains."""
@@ -44,6 +51,7 @@ def warm_up() -> None:
         agents()
         activity(int(required("AGENT_CREDIT_ID")))
         bureau_history(int(required("AGENT_CREDIT_ID")))
+        owner_view(line(int(required("AGENT_CREDIT_ID")))["owner"].lower())
     except Exception as error:
         print(f"warm-up skipped: {str(error)[:120]}", flush=True)
 
@@ -108,6 +116,7 @@ def cached(fn):
 
 _hedera = None
 _hedera_lock = threading.Lock()
+_zg = None
 
 
 def hedera():
@@ -117,6 +126,15 @@ def hedera():
         if _hedera is None:
             _hedera = web3()
         return _hedera
+
+
+def zg_chain():
+    """One reused 0G mainnet connection, for reading compute balances from the PaymentVault."""
+    global _zg
+    with _hedera_lock:
+        if _zg is None:
+            _zg = zg.web3()
+        return _zg
 
 
 @lru_cache(maxsize=None)
@@ -143,6 +161,8 @@ def contracts() -> dict:
         "identityRegistry": IDENTITY_REGISTRY,
         "usdc": required("USDC_TOKEN_ID"),
         "bureau": {"network": "arkiv:rabdi", "owner": bureau_address(), "schema": SCHEMA},
+        "demoAgentId": int(required("AGENT_CREDIT_ID")),
+        "computeMode": optional("COMPUTE_MODE") or "placeholder",
     }
     credit_line, _ = deployed(hedera(), "creditLine")
     out["terms"] = {
@@ -308,7 +328,9 @@ def refusals() -> list[dict]:
     for entity in page["data"]:
         attrs = decode_attrs(entity)
         record = json.loads(bytes.fromhex(attrs["record"].removeprefix("0x")))
-        out[attrs["agentId"]] = {"agentId": attrs["agentId"], "status": "refused", "reason": record["facts"]["reasons"][0]}
+        owner = record["facts"]["owner"]
+        out[attrs["agentId"]] = {"agentId": attrs["agentId"], "status": "refused", "reason": record["facts"]["reasons"][0],
+                                 "owner": owner, "ownerAddress": evm_of(owner), "agentAccount": record["facts"]["agentAccount"]}
     return list(out.values())
 
 
@@ -326,14 +348,23 @@ def overview() -> dict:
     return {"contracts": contracts(), "agent": agent_status(), "line": line(agent_id)}
 
 
-@app.get("/api/agents")
-def agents() -> list[dict]:
-    out = []
+def all_lines() -> list[dict]:
+    """Every agent that has a credit line, in agent ID order."""
     lined = sorted({a["agentId"] for name, a, _ in contract_events(read_deployments()["creditLineContractId"], "CreditLine") if name == "LimitSet"})
     with ThreadPoolExecutor(max_workers=4) as pool:
-        summaries = list(pool.map(line, lined))
-    for summary in summaries:
-        out.append({k: summary[k] for k in ("agentId", "status", "limitUsd", "owedUsd", "availableUsd", "collateral")})
+        return list(pool.map(line, lined))
+
+
+@app.get("/api/contracts")
+def contracts_info() -> dict:
+    """The deployment, its terms and the demo agent's owner (the account the live demo runs on)."""
+    return {**contracts(), "demoOwner": line(int(required("AGENT_CREDIT_ID")))["owner"]}
+
+
+@app.get("/api/agents")
+def agents() -> list[dict]:
+    out = [{k: summary[k] for k in ("agentId", "status", "limitUsd", "owedUsd", "availableUsd", "collateral", "owner", "agent")}
+           for summary in all_lines()]
     with_lines = {a["agentId"] for a in out}
     out += [r for r in refusals() if r["agentId"] not in with_lines]
     return sorted(out, key=lambda a: a["agentId"])
@@ -352,6 +383,135 @@ def agent(agent_id: int) -> dict:
 @app.get("/api/agents/{agent_id}/bureau")
 def bureau(agent_id: int) -> list[dict]:
     return bureau_history(agent_id)
+
+
+@cached
+def vault_compute(account: str) -> dict:
+    wei = zg.vault(zg_chain()).functions.balanceOf(Web3.to_checksum_address(account)).call()
+    return {"source": "0g-vault", "account": account, "balance0G": wei / zg.WEI, "balanceUsd": round(zg.wei_to_usd(wei), 6),
+            "url": f"{zg.EXPLORER}/address/{account}"}
+
+
+@app.get("/api/agents/{agent_id}/compute")
+def agent_compute(agent_id: int) -> dict:
+    """The agent's AI budget: the demo agent's own live status, or any other agent's 0G compute account."""
+    summary = line(agent_id)
+    if agent_id == int(required("AGENT_CREDIT_ID")):
+        return {"source": "agent", "account": summary["zgAccount"], "status": agent_status()}
+    try:
+        return vault_compute(summary["zgAccount"])
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="0G is busy, try again shortly") from error
+
+
+# Owners -----------------------------------------------------------------------------------------------
+
+_evm: dict[str, str | None] = {}
+_lookups: deque[float] = deque()
+_lookups_lock = threading.Lock()
+
+
+def spend_lookup() -> None:
+    """Fresh owner lookups cost mirror-node calls, so at most OWNER_LOOKUPS_PER_MINUTE run a minute.
+
+    Owners already looked up are served from the cache and never count.
+    """
+    now = time.monotonic()
+    with _lookups_lock:
+        while _lookups and now - _lookups[0] > 60:
+            _lookups.popleft()
+        if len(_lookups) >= OWNER_LOOKUPS_PER_MINUTE:
+            raise HTTPException(status_code=429, detail="too many new lookups right now, try again in a minute")
+        _lookups.append(now)
+
+
+def mirror_account(account: str) -> dict | None:
+    """A Hedera account by ID or EVM address, or None if the network has never seen it."""
+    response = requests.get(f"{MIRROR}/accounts/{account}", timeout=20)
+    if response.status_code in (400, 404):
+        return None
+    response.raise_for_status()
+    return response.json()
+
+
+def evm_of(account_id: str) -> str | None:
+    """The lowercase EVM address of a Hedera account (its alias, else its long-zero form)."""
+    if account_id not in _evm:
+        body = mirror_account(account_id)
+        _evm[account_id] = (body.get("evm_address") or long_zero_address(account_id)).lower() if body else None
+    return _evm[account_id]
+
+
+@cached
+def registered_ids(address: str) -> list[int]:
+    """ERC-8004 IDs this address minted: its successful register() calls on the registry, oldest first."""
+    ids, path = [], f"/contracts/{IDENTITY_REGISTRY}/results?from={address}&limit=100&order=asc"
+    for _ in range(10):
+        response = requests.get(f"{MIRROR}{path.removeprefix('/api/v1')}", timeout=30)
+        if response.status_code == 404:
+            return ids
+        response.raise_for_status()
+        body = response.json()
+        for result in body.get("results", []):
+            if result["function_parameters"].startswith(REGISTER_SELECTOR) and not result.get("error_message") \
+                    and len(result.get("call_result") or "") > 2:
+                ids.append(int(result["call_result"], 16))
+        path = (body.get("links") or {}).get("next")
+        if not path:
+            break
+    return ids
+
+
+@cached
+def owner_view(address: str) -> dict:
+    """Everything one owner has with us: credit lines, refused applications and IDs not enrolled yet."""
+    account = mirror_account(address)
+    mine = [summary for summary in all_lines() if summary["owner"].lower() == address]
+    known = {summary["agentId"] for summary in mine}
+    refused = [r for r in refusals() if r["ownerAddress"] == address and r["agentId"] not in known]
+    known |= {r["agentId"] for r in refused}
+    identity = hedera().eth.contract(address=Web3.to_checksum_address(IDENTITY_REGISTRY), abi=IDENTITY_ABI)
+    candidates = [agent_id for agent_id in registered_ids(address) if agent_id not in known]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        holders = list(pool.map(lambda agent_id: identity.functions.ownerOf(agent_id).call(), candidates))
+    unenrolled = [{"agentId": agent_id} for agent_id, holder in zip(candidates, holders) if holder.lower() == address]
+    active = [summary for summary in mine if summary["status"] == "active"]
+    return {
+        "address": Web3.to_checksum_address(address),
+        "account": account["account"] if account else None,
+        "accountUrl": f"https://hashscan.io/testnet/account/{account['account']}" if account else None,
+        "agents": mine,
+        "refused": refused,
+        "unenrolled": unenrolled,
+        "totals": {
+            "limitUsd": round(sum(s["limitUsd"] for s in active), 6),
+            "owedUsd": round(sum(s["owedUsd"] for s in active), 6),
+            "inDefaultUsd": round(sum(s["owedUsd"] for s in mine if s["status"] == "defaulted"), 6),
+            "availableUsd": round(sum(s["availableUsd"] for s in active), 6),
+            "idsLocked": sum(1 for s in mine if s["collateral"]["heldBy"] == "creditLine"),
+            "idsLost": sum(1 for s in mine if s["collateral"]["heldBy"] == "treasury"),
+        },
+    }
+
+
+@app.get("/api/owners/{owner}")
+def owner(owner: str) -> dict:
+    """An owner by EVM address (0x...) or Hedera account (0.0.N)."""
+    if ACCOUNT_ID.fullmatch(owner):
+        if owner not in _evm:
+            spend_lookup()
+        address = evm_of(owner)
+        if address is None:
+            raise HTTPException(status_code=404, detail="no such account on Hedera testnet")
+    elif EVM_ADDRESS.fullmatch(owner):
+        address = owner.lower()
+    else:
+        raise HTTPException(status_code=400, detail="use a wallet address (0x...) or a Hedera account (0.0.N)")
+    with _cache_lock:
+        seen = ("owner_view", address) in _cache
+    if not seen:
+        spend_lookup()
+    return owner_view(address)
 
 
 @app.get("/api/health")
