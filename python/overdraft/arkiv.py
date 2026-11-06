@@ -38,6 +38,7 @@ OP_CREATE = 1
 INDEXED = 0x80
 TYPE_U64, TYPE_BYTES, TYPE_STR, TYPE_ADDR = 3, 7, 8, 9
 BLOCKS_PER_DAY = 43_200  # 2-second blocks
+MAX_PAGE = 100  # the most entities a node returns per query
 MAX_LIFETIME_BLOCKS = 7_884_000
 
 
@@ -143,6 +144,19 @@ def query(condition: str, *, select: dict | None = None, limit: int = 100, offse
     if offset:
         params["offset"] = hex(offset)
     return _rpc("arkiv_query", [condition, params])
+
+
+def query_all(condition: str, *, select: dict | None = None, max_pages: int = 20) -> list[dict]:
+    """Every entity matching the condition, following the node's cursor 100 at a time."""
+    params = {"select": select or {"key": True, "attributes": True}, "limit": hex(MAX_PAGE)}
+    entities: list[dict] = []
+    for _ in range(max_pages):
+        page = _rpc("arkiv_query", [condition, params])
+        entities.extend(page["data"])
+        if len(page["data"]) < MAX_PAGE or not page.get("cursor"):
+            break
+        params = {**params, "cursor": page["cursor"]}
+    return entities
 
 
 def get_entity(key: str) -> dict | None:

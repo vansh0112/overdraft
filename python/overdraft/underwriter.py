@@ -12,6 +12,9 @@ with the limit, so anyone can check that the limit matches the published reasoni
 
     python -m overdraft.underwriter AGENT_ID AGENT_ACCOUNT [--income 0.0.X ...] [--splitter main] [--apply]
 
+Enrolled agents are checked through the console API (overdraft.enrol), which calls underwrite() with
+the agent's own splitter.
+
 The money trail shows who funded whom; it can't see through an exchange or an intermediary more than
 three hops away. It raises the cost of faking income rather than making it impossible, which is why
 new agents also start with small limits.
@@ -21,6 +24,7 @@ import argparse
 import json
 import math
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import requests
@@ -29,8 +33,9 @@ from web3 import Web3
 from . import arkiv
 from .arkiv import Attr
 from .cli import IDENTITY_ABI, IDENTITY_REGISTRY, deployed, splitter_address, tx_link
-from .config import optional, read_deployments, required
+from .config import optional, required
 from .hedera import MIRROR, evm_address_of, format_usdc, operator, send, web3
+from .registry import splitter_ids
 
 WINDOW_DAYS = 30
 TRACE_HOPS = 3
@@ -71,6 +76,16 @@ def mirror(path: str) -> dict:
 
 def account_id_of(evm_address: str) -> str:
     return mirror(f"/api/v1/accounts/{evm_address}")["account"]
+
+
+def account_or_none(evm_address: str) -> str | None:
+    """The Hedera account behind an EVM address, or None if the network has never seen it."""
+    try:
+        return account_id_of(evm_address)
+    except requests.HTTPError as error:
+        if error.response is not None and error.response.status_code == 404:
+            return None
+        raise
 
 
 def is_system(account: str) -> bool:
@@ -153,16 +168,15 @@ def payments_into(income_accounts: list[str], since: str, usdc: str) -> list[tup
     return out
 
 
-def assess(agent_id: int, agent_account: str, owner_account: str, income_accounts: list[str], cost_per_job: int) -> dict:
+def assess(agent_id: int, agent_account: str | None, owner_account: str, income_accounts: list[str], cost_per_job: int) -> dict:
     """Builds the decision from on-chain facts only. Amounts are USDC atomic units (6 decimals)."""
     usdc = required("USDC_TOKEN_ID")
     now = time.time()
     since = f"{now - WINDOW_DAYS * 86_400:.9f}"
     lender = {required("HEDERA_OPERATOR_ID")} | {a for a in (optional("POOL_ACCOUNT_ID"), optional("COMPUTE_BUCKET_ACCOUNT_ID")) if a}
-    splitters = {d["splitterContractId"] for d in [read_deployments()] if d.get("splitterContractId")}
-    splitters |= {s["contractId"] for s in read_deployments().get("splitters", {}).values()}
+    splitters = set(splitter_ids())
     # The agent's side: its owner, the agent itself, and any income account that is a plain wallet it controls.
-    cluster = {owner_account, agent_account} | {a for a in income_accounts if a not in splitters}
+    cluster = {owner_account} | ({agent_account} if agent_account else set()) | {a for a in income_accounts if a not in splitters}
 
     customers: dict[str, Customer] = {}
     lender_transfers = 0
@@ -293,8 +307,15 @@ def publish(record: dict, decision_hash: str) -> dict:
     return arkiv.create_entity(attrs, RECORD_LIFETIME_BLOCKS)
 
 
-def underwrite(agent_id: int, agent_account: str, income: list[str] | None, splitter_name: str,
-               zg_account: str | None, cost_per_job_usd: float, apply: bool) -> dict:
+def underwrite(agent_id: int, agent: str, income: list[str] | None, splitter_name: str | None, zg_account: str | None,
+               cost_per_job_usd: float, apply: bool, *, splitter: tuple[str, str] | None = None,
+               step: Callable[[str], None] = lambda label: None) -> dict:
+    """Assesses an agent and, with apply, publishes the decision on Arkiv and sets its limit on Hedera.
+
+    `agent` is the agent's Hedera account (0.0.N) or EVM address. `splitter` is (EVM address, contract ID);
+    without it the named splitter is used. `step` is told as each stage completes ("traced", "published",
+    "limit"). Returns {"record", "decisionHash", "entity", "limitTx"}.
+    """
     w3 = web3()
     identity = w3.eth.contract(address=Web3.to_checksum_address(IDENTITY_REGISTRY), abi=IDENTITY_ABI)
     owner_account = account_id_of(identity.functions.ownerOf(agent_id).call())
@@ -302,10 +323,14 @@ def underwrite(agent_id: int, agent_account: str, income: list[str] | None, spli
     line = credit_line.functions.lines(agent_id).call()
     if line[-1] == 1 and line[7]:  # while the ID is locked as collateral, ownerOf is the CreditLine
         owner_account = account_id_of(line[1])
-    if not income:
-        income = [splitter_address(splitter_name)[1]]
+    if agent.startswith("0x"):
+        agent_evm, agent_account = Web3.to_checksum_address(agent), account_or_none(agent)
+    else:
+        agent_evm, agent_account = evm_address_of(agent), agent
+    splitter = splitter or splitter_address(splitter_name or "main")
+    income = income or [splitter[1]]
 
-    print(f"Underwriting agent {agent_id} (agent {agent_account}, owner {owner_account}); income into {', '.join(income)}")
+    print(f"Underwriting agent {agent_id} (agent {agent_account or agent_evm}, owner {owner_account}); income into {', '.join(income)}", flush=True)
     facts = assess(agent_id, agent_account, owner_account, income, round(cost_per_job_usd * 1_000_000))
     for c in facts["customers"]:
         trail = " <- ".join(c["path"]) if c["path"] else f"funded by {', '.join(c['fundedBy']) or 'nobody found'}"
@@ -315,32 +340,37 @@ def underwrite(agent_id: int, agent_account: str, income: list[str] | None, spli
     memo, author = write_memo(facts)
     record = {"facts": facts, "memo": memo, "memoAuthor": author}
     decision_hash = Web3.keccak(canonical(record)).to_0x_hex()
+    step("traced")
     verdict = f"APPROVED, limit {format_usdc(facts['limit'])}" if facts["approved"] else "REFUSED"
     print(f"{verdict}. Verified {format_usdc(facts['verifiedIncome'])} of {format_usdc(facts['received'])}, "
           f"counted {format_usdc(facts['countedIncome'])}, {facts['independentCustomers']} independent customer(s)")
     print(f"Memo ({author}): {memo}")
-    print(f"Decision hash {decision_hash}")
+    print(f"Decision hash {decision_hash}", flush=True)
+    result = {"record": record, "decisionHash": decision_hash, "entity": None, "limitTx": None}
     if not apply:
         print("Dry run: add --apply to publish the decision and set the limit.")
-        return record
+        return result
 
-    entity = publish(record, decision_hash)
-    print(f"Decision published on Arkiv: entity {entity['key']}  https://rabdi.explorer.arkiv.network/tx/{entity['txHash']}")
+    result["entity"] = publish(record, decision_hash)
+    print(f"Decision published on Arkiv: entity {result['entity']['key']}  "
+          f"https://rabdi.explorer.arkiv.network/tx/{result['entity']['txHash']}", flush=True)
+    step("published")
     has_line = line[-1] == 1
     if facts["approved"] or has_line:  # a refusal on an existing line sets its limit to zero
         account = operator()
-        splitter, _ = splitter_address(splitter_name)
-        zg = Web3.to_checksum_address(zg_account or (line[3] if has_line else None) or optional("ZG_AGENT_ADDRESS") or evm_address_of(agent_account))
-        tx = credit_line.functions.setLimit(agent_id, evm_address_of(agent_account), splitter, zg, facts["limit"],
+        zg = Web3.to_checksum_address(zg_account or (line[3] if has_line else None) or optional("ZG_AGENT_ADDRESS") or agent_evm)
+        tx = credit_line.functions.setLimit(agent_id, agent_evm, splitter[0], zg, facts["limit"],
                                             Web3.to_bytes(hexstr=decision_hash)).build_transaction({"from": account.address, "gas": 400_000})
-        print(f"setLimit({agent_id}, {format_usdc(facts['limit'])}) with the decision hash  {tx_link(send(w3, account, tx))}")
-    return record
+        result["limitTx"] = tx_link(send(w3, account, tx))
+        print(f"setLimit({agent_id}, {format_usdc(facts['limit'])}) with the decision hash  {result['limitTx']}", flush=True)
+    step("limit")
+    return result
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Set an agent's credit limit from income it can prove is real.")
     parser.add_argument("agent_id", type=int, help="the agent's ERC-8004 ID")
-    parser.add_argument("agent_account", help="the agent's Hedera account ID")
+    parser.add_argument("agent_account", help="the agent's Hedera account ID or EVM address")
     parser.add_argument("--income", action="append", help="an account the agent's customers pay (repeatable); defaults to its splitter")
     parser.add_argument("--splitter", default="main", help="the splitter the credit line will use")
     parser.add_argument("--zg-account", help="the agent's 0G compute account")

@@ -5,6 +5,7 @@ import time
 import requests
 from eth_account import Account
 from web3 import Web3
+from web3.exceptions import TimeExhausted
 from web3.providers.rpc.utils import ExceptionRetryConfiguration
 
 from .config import optional, required
@@ -65,36 +66,55 @@ def token_balance(entity_id: str, token_id: str) -> int:
 
 
 def send(w3: Web3, account, tx: dict) -> dict:
-    """Signs and sends a legacy-priced transaction, waits for its receipt, and fails loudly if it reverted."""
-    tx = {key: value for key, value in tx.items() if key not in ("maxFeePerGas", "maxPriorityFeePerGas", "type")}
-    tx.update(
-        {
-            "from": account.address,
-            "nonce": w3.eth.get_transaction_count(account.address),
-            "gasPrice": w3.eth.gas_price,
-            "chainId": w3.eth.chain_id,
-        }
-    )
-    signed = account.sign_transaction(tx)
-    tx_hash = signed.hash
+    """Signs and sends a legacy-priced transaction, waits for its receipt, and fails loudly if it reverted.
+
+    Several services send from the operator account. If another one takes the nonce first, the
+    transaction is signed again with the next nonce instead of waiting for a receipt that never comes.
+    """
+    tx = {key: value for key, value in tx.items() if key not in ("maxFeePerGas", "maxPriorityFeePerGas", "type", "nonce")}
+    tx.update({"from": account.address, "gasPrice": w3.eth.gas_price, "chainId": w3.eth.chain_id})
+    for _ in range(4):
+        signed = account.sign_transaction({**tx, "nonce": w3.eth.get_transaction_count(account.address, "pending")})
+        if _broadcast(w3, signed):
+            return _receipt(w3, signed.hash)
+        # The nonce was taken: by this same transaction on an earlier attempt, or by another sender.
+        try:
+            return _receipt(w3, signed.hash, timeout=15)
+        except RuntimeError as error:
+            if "reverted" in str(error):
+                raise
+    raise RuntimeError("Couldn't get a nonce for the transaction: other senders kept taking it")
+
+
+def _broadcast(w3: Web3, signed) -> bool:
+    """Sends a signed transaction. False if its nonce was already used; True once the node has it."""
     for attempt in range(6):
         # Re-sending the same signed transaction is safe: it has one hash and can only be included once.
         try:
             w3.eth.send_raw_transaction(signed.raw_transaction)
-            break
+            return True
         except NETWORK_ERRORS:
             time.sleep(2 + attempt * 2)
         except ValueError as error:
-            if "known" in str(error).lower() or "nonce too low" in str(error).lower():
-                break
+            message = str(error).lower()
+            if "known" in message:
+                return True
+            if "nonce too low" in message:
+                return False
             raise
+    return True
+
+
+def _receipt(w3: Web3, tx_hash, timeout: int = 180) -> dict:
     receipt = None
-    for attempt in range(6):
+    for _ in range(6 if timeout >= 60 else 1):
         try:
-            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=timeout)
             break
         except NETWORK_ERRORS:
             time.sleep(3)
+        except TimeExhausted:
+            break
     if receipt is None:
         raise RuntimeError(f"No receipt for {hashscan_tx(tx_hash.to_0x_hex())}")
     if receipt["status"] != 1:

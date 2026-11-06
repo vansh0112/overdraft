@@ -13,6 +13,7 @@ import time
 
 from web3.logs import DISCARD
 
+from . import registry
 from .cli import deployed, format_usdc, tx_link
 from .config import read_deployments, required
 from .hedera import long_zero_address, operator, send, web3
@@ -25,11 +26,15 @@ BALANCE_OF_ABI = [
 
 
 def splitters() -> list[tuple[str, str]]:
-    """(name, EVM address) for the main splitter and every named one."""
+    """(label, EVM address) for every agent's splitter: each line's, plus any named in the deployments file."""
+    out = {line.splitter.lower(): (f"agent {line.agent_id}", line.splitter) for line in registry.lines()}
     deployments = read_deployments()
-    out = [("main", deployments["splitterEvmAddress"])] if deployments.get("splitterEvmAddress") else []
-    out += [(name, entry["evmAddress"]) for name, entry in deployments.get("splitters", {}).items()]
-    return out
+    named = [("main", deployments.get("splitterEvmAddress"))]
+    named += [(name, entry["evmAddress"]) for name, entry in deployments.get("splitters", {}).items()]
+    for name, address in named:
+        if address and address.lower() not in out:
+            out[address.lower()] = (name, address)
+    return list(out.values())
 
 
 def release_if_repaid(w3, account, credit_line, splitter_address: str) -> None:
@@ -51,10 +56,16 @@ def main() -> None:
     usdc = w3.eth.contract(address=long_zero_address(required("USDC_TOKEN_ID")), abi=BALANCE_OF_ABI)
     splitter_abi = load_abi("IncomeSplitter")
     minimum = round(args.min * 1_000_000)
-    print(f"Sweeping {len(splitters())} splitter(s) every {args.interval}s (min {format_usdc(minimum)})", flush=True)
+    print(f"Sweeping {len(splitters())} splitter(s) every {args.interval}s (min {format_usdc(minimum)}); "
+          "newly enrolled agents are picked up as their lines open", flush=True)
 
     while True:
-        for name, address in splitters():
+        try:
+            current = splitters()
+        except Exception as error:  # mirror node busy: retry next round
+            print(f"{time.strftime('%H:%M:%S')} couldn't list splitters: {str(error)[:120]}", flush=True)
+            current = []
+        for name, address in current:
             try:
                 splitter = w3.eth.contract(address=address, abi=splitter_abi)
                 if usdc.functions.balanceOf(address).call() >= minimum:

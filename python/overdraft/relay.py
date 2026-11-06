@@ -19,10 +19,10 @@ import time
 from web3 import Web3
 
 from . import zg
-from .bureau import decode, new_logs, splitter_ids
 from .cli import deployed, tx_link
 from .config import ROOT, optional, read_deployments
 from .hedera import operator, send, web3 as hedera_web3
+from .registry import decode, new_logs, splitter_ids
 from .solidity import load_abi
 
 LIVE = (optional("COMPUTE_MODE") or "placeholder") == "0g"
@@ -122,7 +122,7 @@ def sync_once(state: dict, skip_existing: bool) -> None:
     credit_line, _ = deployed(hedera_web3(), "creditLine")
     splitter_abi = load_abi("IncomeSplitter")
     sources = [(deployments["creditLineContractId"], Web3().eth.contract(abi=load_abi("CreditLine")))]
-    sources += [(contract_id, Web3().eth.contract(abi=splitter_abi)) for contract_id in splitter_ids(deployments)]
+    sources += [(contract_id, Web3().eth.contract(abi=splitter_abi)) for contract_id in splitter_ids()]
     first_run = not state["cursors"]
     for contract_id, contract in sources:
         for log in new_logs(contract_id, state["cursors"].get(contract_id)):

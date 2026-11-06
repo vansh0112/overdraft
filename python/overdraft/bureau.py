@@ -13,14 +13,13 @@ import argparse
 import json
 import time
 
-import requests
-from hexbytes import HexBytes
 from web3 import Web3
 
 from . import arkiv
 from .arkiv import Attr
-from .config import ROOT, read_deployments
-from .hedera import MIRROR, format_usdc, hashscan_tx
+from .config import ROOT, optional, read_deployments
+from .hedera import format_usdc, hashscan_tx
+from .registry import decode, new_logs, splitter_ids
 from .solidity import load_abi
 
 SCHEMA = "overdraft.bureau"
@@ -28,6 +27,11 @@ DAY = arkiv.BLOCKS_PER_DAY
 LIFETIME_BLOCKS = {"decision": 90 * DAY, "loan": 180 * DAY, "disbursed": 180 * DAY, "repayment": 90 * DAY, "repaid": 180 * DAY,
                    "default": 90 * DAY}
 STATE_PATH = ROOT / "python" / ".state" / "bureau.json"
+
+
+def bureau_address() -> str:
+    """The bureau wallet that owns every record; read-only deployments set it without the key."""
+    return optional("ARKIV_BUREAU_ADDRESS") or arkiv.bureau().address
 
 
 def load_state() -> dict:
@@ -39,42 +43,6 @@ def load_state() -> dict:
 def save_state(state: dict) -> None:
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps(state, indent=2) + "\n")
-
-
-def new_logs(contract_id: str, cursor: dict | None) -> list[dict]:
-    """Logs emitted by a contract after the cursor, oldest first, from the mirror node."""
-    params = f"order=asc&limit=100&timestamp=gte:{cursor['timestamp']}" if cursor else "order=asc&limit=100"
-    url = f"{MIRROR}/contracts/{contract_id}/results/logs?{params}"
-    logs = []
-    while url:
-        body = requests.get(url, timeout=30).json()
-        logs.extend(body.get("logs", []))
-        nxt = (body.get("links") or {}).get("next")
-        url = f"{MIRROR.rsplit('/api/v1', 1)[0]}{nxt}" if nxt else None
-    if cursor:
-        logs = [l for l in logs if (l["timestamp"], l["index"]) > (cursor["timestamp"], cursor["index"])]
-    return logs
-
-
-def decode(contract, log: dict):
-    """Returns (event name, args) for a mirror-node log, or None if it isn't one of the contract's events."""
-    entry = {
-        "address": Web3.to_checksum_address(log["address"]),
-        "topics": [HexBytes(t) for t in log["topics"]],
-        "data": HexBytes(log["data"]),
-        "blockNumber": log["block_number"],
-        "transactionHash": HexBytes(log["transaction_hash"]),
-        "transactionIndex": log.get("transaction_index") or 0,
-        "blockHash": HexBytes(log["block_hash"][:66]),
-        "logIndex": log["index"],
-    }
-    for event in contract.events:
-        try:
-            decoded = event().process_log(entry)
-            return decoded["event"], decoded["args"]
-        except Exception:
-            continue
-    return None
 
 
 def records_for(name: str, args, tx_hash: str, state: dict) -> list[tuple[str, list[Attr]]]:
@@ -128,20 +96,13 @@ def records_for(name: str, args, tx_hash: str, state: dict) -> list[tuple[str, l
     return []
 
 
-def splitter_ids(deployments: dict) -> list[str]:
-    """Every agent's splitter: the main one and any named ones."""
-    ids = [deployments["splitterContractId"]] if deployments.get("splitterContractId") else []
-    ids += [entry["contractId"] for entry in deployments.get("splitters", {}).values()]
-    return ids
-
-
 def sync_once(state: dict) -> int:
     """Writes every new fact since the last sync to Arkiv in one batch. Returns how many were written."""
     deployments = read_deployments()
     w3 = Web3()
     splitter_abi = load_abi("IncomeSplitter")
     sources = [(deployments["creditLineContractId"], w3.eth.contract(abi=load_abi("CreditLine")))]
-    sources += [(contract_id, w3.eth.contract(abi=splitter_abi)) for contract_id in splitter_ids(deployments)]
+    sources += [(contract_id, w3.eth.contract(abi=splitter_abi)) for contract_id in splitter_ids()]
     pending: list[tuple[str, list[Attr]]] = []
     cursors = dict(state["cursors"])
     for contract_id, contract in sources:  # credit line first, so splitters map to agents

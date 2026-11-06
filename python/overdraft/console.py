@@ -3,7 +3,8 @@
 Everything it returns is read from public sources (the CreditLine and splitters on Hedera, the mirror
 node, the PaymentVault on 0G, the bureau on Arkiv) or from the agent's public status, so the console
 never shows a number the chain can't back. Owners are looked up by wallet address or Hedera account,
-with no sign-in: everything about an owner's agents is public on-chain. Demo controls start a paid rush or re-run the fake-earnings check; they need the
+with no sign-in: everything about an owner's agents is public on-chain. Enrolling an agent and asking
+for a credit check are signed by the owner's wallet and checked in overdraft.enrol. Demo controls start a paid rush or re-run the fake-earnings check; they need the
 CONSOLE_DEMO_PASSWORD in an x-demo-password header and run one at a time.
 
     uvicorn overdraft.console:app --port 8000
@@ -21,17 +22,18 @@ from contextlib import asynccontextmanager
 from functools import lru_cache, wraps
 
 import requests
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from web3 import Web3
 
-from . import arkiv, zg
-from .bureau import SCHEMA, decode, new_logs
+from . import applications, arkiv, endpoint, enrol, zg
+from .bureau import SCHEMA, bureau_address
 from .cli import IDENTITY_ABI, IDENTITY_REGISTRY, STATUS, deployed
 from .config import ROOT, optional, read_deployments, required
 from .hedera import MIRROR, contract_id_of, hashscan_contract, hashscan_tx, long_zero_address, token_balance, web3
+from .registry import decode, new_logs
 from .solidity import load_abi
 
 USDC = 1_000_000
@@ -43,6 +45,9 @@ ACCOUNT_ID = re.compile(r"0\.0\.\d{1,12}")
 EVM_ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 REGISTER_SELECTOR = "0xf2c298be"  # register(string): mints a new ERC-8004 ID to the caller
 OWNER_LOOKUPS_PER_MINUTE = 30
+READINESS_CHECKS_PER_MINUTE = 120
+SIGNATURE = r"^0x[0-9a-fA-F]{130}$"
+EVM_PATTERN = r"^0x[0-9a-fA-F]{40}$"  # request validators match anywhere unless anchored
 
 def warm_up() -> None:
     """Fills the cache once at start, so the first visitor doesn't wait for the chains."""
@@ -59,6 +64,7 @@ def warm_up() -> None:
 @asynccontextmanager
 async def lifespan(_app):
     threading.Thread(target=warm_up, daemon=True).start()
+    enrol.start_worker()
     yield
 
 
@@ -70,6 +76,11 @@ app.add_middleware(CORSMiddleware, allow_origins=ORIGINS, allow_methods=["GET", 
 def upstream_unavailable(_request, error: requests.RequestException) -> JSONResponse:
     """A public node (Hedera mirror, Arkiv) is busy or down: say so instead of failing with a 500."""
     return JSONResponse(status_code=503, content={"detail": "a public node is busy, try again shortly", "upstream": str(error)[:160]})
+
+
+@app.exception_handler(enrol.EnrolError)
+def enrolment_refused(_request, error: enrol.EnrolError) -> JSONResponse:
+    return JSONResponse(status_code=error.status, content={"detail": str(error)})
 
 _cache: dict[tuple, tuple[float, object]] = {}
 _cache_lock = threading.Lock()
@@ -146,11 +157,6 @@ def usd(atomic: int) -> float:
     return round(atomic / USDC, 6)
 
 
-def bureau_address() -> str:
-    """The bureau wallet that owns every record; read-only deployments set it without the key."""
-    return optional("ARKIV_BUREAU_ADDRESS") or arkiv.bureau().address
-
-
 @cached
 def contracts() -> dict:
     d = read_deployments()
@@ -209,7 +215,38 @@ def line(agent_id: int) -> dict:
             "holder": holder,
         },
         "loans": loans,
+        **line_stage(agent_id, status, limit, "0x" + bytes(decision_hash).hex()),
     }
+
+
+def line_stage(agent_id: int, status: int, limit: int, decision_hash: str) -> dict:
+    """approved (has credit), enrolled (waiting for its first check), refused, no-credit or defaulted.
+
+    A line opened at enrolment carries its application's hash; a refusal on a line carries the refusal's.
+    If Arkiv can't be read, the stage falls back to what the chain alone says.
+    """
+    try:
+        found = applications.latest().get(agent_id)
+        refused = next((r for r in refusal_records() if r["decisionHash"] == decision_hash), None)
+    except Exception as error:  # Arkiv busy: say what the chain alone can, and leave a trace in the log
+        print(f"stage of agent {agent_id} read without Arkiv: {str(error)[:160]}", flush=True)
+        found, refused = None, None
+    application = None
+    if found:
+        record = found["record"]
+        application = {"endpoint": record["endpoint"], "incomeAccount": record["incomeAccount"] or None,
+                       "aiCostPerJobUsd": usd(int(record["aiCostPerJob"])), "enrolledAt": record["enrolledAt"],
+                       "arkivKey": found["key"], "priceUsd": usd(record["terms"]["price"])}
+    if status == 2:
+        stage = "defaulted"
+    elif limit > 0:
+        stage = "approved"
+    elif found and found["fingerprint"] == decision_hash:
+        stage = "enrolled"
+    else:
+        stage = "refused" if refused else "no-credit"
+    return {"stage": stage, "reason": refused["facts"]["reasons"][0] if refused and stage == "refused" else None,
+            "application": application}
 
 
 def decode_attrs(entity: dict) -> dict:
@@ -226,9 +263,8 @@ def decode_attrs(entity: dict) -> dict:
 def bureau_history(agent_id: int) -> list[dict]:
     current = arkiv.block_timing()["current_block"]
     condition = f"arkiv.schema = str('{SCHEMA}') AND $owner = addr({bureau_address()}) AND agentId = u64({agent_id})"
-    page = arkiv.query(condition, select={"key": True, "expiresAt": True, "attributes": True}, limit=100)
     records = []
-    for entity in page["data"]:
+    for entity in arkiv.query_all(condition, select={"key": True, "expiresAt": True, "attributes": True}):
         attrs = decode_attrs(entity)
         record = {"key": entity["key"], "kind": attrs["kind"], "expiresInDays": round((int(entity["expiresAt"], 16) - current) / arkiv.BLOCKS_PER_DAY, 1)}
         for name in ("amount", "limit", "owedAfter", "owed"):
@@ -246,7 +282,8 @@ def bureau_history(agent_id: int) -> list[dict]:
             record["hashMatches"] = Web3.keccak(raw).to_0x_hex() == attrs["decisionHash"]
             record["decisionHash"] = attrs["decisionHash"]
         records.append(record)
-    order = {"underwriting": 0, "refusal": 0, "decision": 1, "loan": 2, "disbursed": 3, "repayment": 4, "repaid": 5, "default": 6}
+    order = {"application": 0, "underwriting": 1, "refusal": 1, "decision": 2, "loan": 3, "disbursed": 4, "repayment": 5, "repaid": 6,
+             "default": 7}
     return sorted(records, key=lambda r: (order.get(r["kind"], 9), r.get("drawId", 0)))
 
 
@@ -320,17 +357,24 @@ def activity(agent_id: int) -> list[dict]:
 
 
 @cached
-def refusals() -> list[dict]:
-    """Agents the underwriter refused: they have a decision on Arkiv but no credit line."""
+def refusal_records() -> list[dict]:
+    """Every refusal on Arkiv: {agentId, decisionHash, facts}."""
     condition = f"arkiv.schema = str('{SCHEMA}') AND $owner = addr({bureau_address()}) AND kind = str('refusal')"
-    page = arkiv.query(condition, select={"attributes": True}, limit=100)
-    out = {}
-    for entity in page["data"]:
+    out = []
+    for entity in arkiv.query_all(condition, select={"attributes": True}):
         attrs = decode_attrs(entity)
         record = json.loads(bytes.fromhex(attrs["record"].removeprefix("0x")))
-        owner = record["facts"]["owner"]
-        out[attrs["agentId"]] = {"agentId": attrs["agentId"], "status": "refused", "reason": record["facts"]["reasons"][0],
-                                 "owner": owner, "ownerAddress": evm_of(owner), "agentAccount": record["facts"]["agentAccount"]}
+        out.append({"agentId": attrs["agentId"], "decisionHash": attrs["decisionHash"], "facts": record["facts"]})
+    return out
+
+
+def refusals() -> list[dict]:
+    """Agents the underwriter refused, one entry each (agents() lists those without a line)."""
+    out = {}
+    for r in refusal_records():
+        owner = r["facts"]["owner"]
+        out[r["agentId"]] = {"agentId": r["agentId"], "status": "refused", "stage": "refused", "reason": r["facts"]["reasons"][0],
+                             "owner": owner, "ownerAddress": evm_of(owner), "agentAccount": r["facts"]["agentAccount"]}
     return list(out.values())
 
 
@@ -363,7 +407,7 @@ def contracts_info() -> dict:
 
 @app.get("/api/agents")
 def agents() -> list[dict]:
-    out = [{k: summary[k] for k in ("agentId", "status", "limitUsd", "owedUsd", "availableUsd", "collateral", "owner", "agent")}
+    out = [{k: summary[k] for k in ("agentId", "status", "stage", "reason", "limitUsd", "owedUsd", "availableUsd", "collateral", "owner", "agent")}
            for summary in all_lines()]
     with_lines = {a["agentId"] for a in out}
     out += [r for r in refusals() if r["agentId"] not in with_lines]
@@ -407,22 +451,29 @@ def agent_compute(agent_id: int) -> dict:
 # Owners -----------------------------------------------------------------------------------------------
 
 _evm: dict[str, str | None] = {}
-_lookups: deque[float] = deque()
-_lookups_lock = threading.Lock()
 
 
-def spend_lookup() -> None:
-    """Fresh owner lookups cost mirror-node calls, so at most OWNER_LOOKUPS_PER_MINUTE run a minute.
+class PerMinute:
+    """Allows at most `limit` calls a minute; the rest get HTTP 429."""
 
-    Owners already looked up are served from the cache and never count.
-    """
-    now = time.monotonic()
-    with _lookups_lock:
-        while _lookups and now - _lookups[0] > 60:
-            _lookups.popleft()
-        if len(_lookups) >= OWNER_LOOKUPS_PER_MINUTE:
-            raise HTTPException(status_code=429, detail="too many new lookups right now, try again in a minute")
-        _lookups.append(now)
+    def __init__(self, limit: int, what: str):
+        self.limit, self.what = limit, what
+        self.times: deque[float] = deque()
+        self.lock = threading.Lock()
+
+    def spend(self) -> None:
+        now = time.monotonic()
+        with self.lock:
+            while self.times and now - self.times[0] > 60:
+                self.times.popleft()
+            if len(self.times) >= self.limit:
+                raise HTTPException(status_code=429, detail=f"too many {self.what} right now, try again in a minute")
+            self.times.append(now)
+
+
+# Fresh owner lookups cost mirror-node calls; owners already looked up are served from the cache and never count.
+owner_lookups = PerMinute(OWNER_LOOKUPS_PER_MINUTE, "new lookups")
+readiness_checks = PerMinute(READINESS_CHECKS_PER_MINUTE, "enrolment checks")
 
 
 def mirror_account(account: str) -> dict | None:
@@ -499,7 +550,7 @@ def owner(owner: str) -> dict:
     """An owner by EVM address (0x...) or Hedera account (0.0.N)."""
     if ACCOUNT_ID.fullmatch(owner):
         if owner not in _evm:
-            spend_lookup()
+            owner_lookups.spend()
         address = evm_of(owner)
         if address is None:
             raise HTTPException(status_code=404, detail="no such account on Hedera testnet")
@@ -510,13 +561,85 @@ def owner(owner: str) -> dict:
     with _cache_lock:
         seen = ("owner_view", address) in _cache
     if not seen:
-        spend_lookup()
+        owner_lookups.spend()
     return owner_view(address)
 
 
 @app.get("/api/health")
 def health() -> dict:
     return {"ok": True, "demoControls": bool(DEMO_PASSWORD)}
+
+
+# Enrolment --------------------------------------------------------------------------------------------
+
+class EnrolRequest(BaseModel):
+    """An owner's signed enrolment (EIP-712 'Enrol'); see overdraft.enrol."""
+
+    agentId: int = Field(ge=0, le=2**63 - 1)
+    agent: str = Field(pattern=EVM_PATTERN)
+    zgAccount: str = Field(pattern=EVM_PATTERN)
+    endpoint: str = Field(min_length=8, max_length=200, pattern=r"^\S+$")
+    incomeAccount: str = Field(default="", pattern=r"^(0\.0\.\d{1,12})?$")
+    aiCostPerJob: int = Field(gt=0, le=enrol.MAX_AI_COST_PER_JOB)
+    issuedAt: int = Field(gt=0)
+    signature: str = Field(pattern=SIGNATURE)
+
+
+class CheckRequest(BaseModel):
+    """An owner's signed request for a credit check (EIP-712 'CreditCheck')."""
+
+    issuedAt: int = Field(gt=0)
+    signature: str = Field(pattern=SIGNATURE)
+
+
+@app.get("/api/enrol/config")
+def enrol_config() -> dict:
+    return enrol.config()
+
+
+@app.get("/api/enrol/readiness")
+def enrol_readiness(owner: str = Query(pattern=EVM_PATTERN), agentId: int | None = Query(default=None, ge=0)) -> dict:
+    readiness_checks.spend()
+    return enrol.readiness(owner, agentId)
+
+
+@app.post("/api/enrol", status_code=202)
+def enrol_agent(request: EnrolRequest) -> dict:
+    return enrol.start_enrolment(request.model_dump())
+
+
+@app.get("/api/enrol/{agent_id}")
+def enrol_status(agent_id: int) -> dict:
+    return {"job": enrol.job("enrol", agent_id)}
+
+
+@app.post("/api/agents/{agent_id}/check", status_code=202)
+def check_agent(agent_id: int, request: CheckRequest) -> dict:
+    return enrol.start_check(agent_id, request.issuedAt, request.signature)
+
+
+@app.get("/api/agents/{agent_id}/check")
+def check_status(agent_id: int) -> dict:
+    return {"job": enrol.job("check", agent_id)}
+
+
+@cached
+def endpoint_status(agent_id: int) -> dict:
+    found = applications.latest().get(agent_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="this agent has no enrolment application on record")
+    url, splitter_id = found["record"]["endpoint"], line(agent_id)["splitter"]["id"]
+    try:
+        pay_to, error = sorted(endpoint.quote(url)["payTo"]), None
+    except ValueError as problem:
+        pay_to, error = [], str(problem)
+    return {"endpoint": url, "payTo": pay_to, "splitterId": splitter_id, "paysSplitter": splitter_id in pay_to, "error": error}
+
+
+@app.get("/api/agents/{agent_id}/endpoint")
+def agent_endpoint(agent_id: int) -> dict:
+    """Whether the agent's paid endpoint asks customers to pay its splitter, as a customer would see it."""
+    return endpoint_status(agent_id)
 
 
 # Demo controls ----------------------------------------------------------------------------------------

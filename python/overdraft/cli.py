@@ -17,12 +17,14 @@
 import argparse
 import time
 
+import requests
 from eth_account import Account
 from web3 import Web3
 from web3.logs import DISCARD
 
 from .config import optional, read_deployments, required, write_deployments
 from .hedera import (
+    MIRROR,
     contract_id_of,
     evm_address_of,
     format_usdc,
@@ -101,13 +103,18 @@ def splitter_address(name: str) -> tuple[str, str]:
     return entry["evmAddress"], entry["contractId"]
 
 
+_compiled: dict[tuple[str, str], tuple[list, str]] = {}
+
+
 def deploy(w3, account, file_name: str, contract_name: str, args: tuple, gas: int):
-    abi, bytecode = compile_contract(file_name, contract_name)
+    if (file_name, contract_name) not in _compiled:  # compiling takes seconds; the sources don't change while running
+        _compiled[(file_name, contract_name)] = compile_contract(file_name, contract_name)
+    abi, bytecode = _compiled[(file_name, contract_name)]
     factory = w3.eth.contract(abi=abi, bytecode=bytecode)
     receipt = send(w3, account, factory.constructor(*args).build_transaction({"from": account.address, "gas": gas}))
     address = receipt["contractAddress"]
     contract_id = contract_id_of(address)
-    print(f"{contract_name} deployed: {contract_id} ({address})  {tx_link(receipt)}")
+    print(f"{contract_name} deployed: {contract_id} ({address})  {tx_link(receipt)}", flush=True)
     return w3.eth.contract(address=address, abi=abi), contract_id
 
 
@@ -123,26 +130,51 @@ def deploy_credit_line() -> None:
           "Deploy a new splitter next: a splitter binds to one credit line, once.")
 
 
-def deploy_splitter(name: str) -> None:
-    w3, account = web3(), operator()
+def payout_address(env_name: str, fallback: str) -> str:
+    """The EVM address of the account named in env_name, or the fallback."""
+    account_id = optional(env_name)
+    return evm_address_of(account_id) if account_id else fallback
+
+
+def deploy_splitter_contract(w3, account, owner: str):
+    """Deploys an agent's IncomeSplitter that pays `owner` the rest of each payment. Returns (contract, contract ID)."""
+    usdc = long_zero_address(required("USDC_TOKEN_ID"))
+    args = (usdc, Web3.to_checksum_address(owner), payout_address("POOL_ACCOUNT_ID", account.address),
+            payout_address("COMPUTE_BUCKET_ACCOUNT_ID", account.address), LENDER_BPS, COMPUTE_BPS)
+    return deploy(w3, account, "IncomeSplitter.sol", "IncomeSplitter", args, 1_500_000)
+
+
+def prepare_splitter(w3, account, splitter, contract_id: str, step=lambda key: None) -> None:
+    """Lets a splitter hold USDC and binds it to the CreditLine, skipping whatever is already done.
+    `step` is told "associated" and then "bound"."""
     credit_line = read_deployments().get("creditLineEvmAddress")
     if not credit_line:
         raise SystemExit("Deploy the credit line first: deploy-credit-line")
+    if not usdc_associated(contract_id):
+        receipt = send(w3, account, splitter.functions.associateUsdc().build_transaction({"from": account.address, "gas": 1_000_000}))
+        print(f"associateUsdc(): ok  {tx_link(receipt)}", flush=True)
+    step("associated")
+    bound = splitter.functions.creditLine().call()
+    if bound == ZERO_ADDRESS:
+        receipt = send(w3, account, splitter.functions.bindCreditLine(credit_line).build_transaction({"from": account.address, "gas": 100_000}))
+        print(f"bindCreditLine(): ok  {tx_link(receipt)}", flush=True)
+    elif bound.lower() != credit_line.lower():
+        raise RuntimeError(f"splitter {contract_id} is bound to another credit line ({bound})")
+    step("bound")
 
-    def payout(env_name: str, fallback: str) -> str:
-        account_id = optional(env_name)
-        return evm_address_of(account_id) if account_id else fallback
 
-    owner = payout("OWNER_ACCOUNT_ID", evm_address_of(optional("HEDERA_OWNER_ID")) if optional("HEDERA_OWNER_ID") else account.address)
-    usdc = long_zero_address(required("USDC_TOKEN_ID"))
-    args = (usdc, owner, payout("POOL_ACCOUNT_ID", account.address), payout("COMPUTE_BUCKET_ACCOUNT_ID", account.address),
-            LENDER_BPS, COMPUTE_BPS)
-    splitter, contract_id = deploy(w3, account, "IncomeSplitter.sol", "IncomeSplitter", args, 1_500_000)
-    receipt = send(w3, account, splitter.functions.associateUsdc().build_transaction({"from": account.address, "gas": 1_000_000}))
-    print(f"associateUsdc(): ok  {tx_link(receipt)}")
-    receipt = send(w3, account, splitter.functions.bindCreditLine(credit_line).build_transaction({"from": account.address, "gas": 100_000}))
-    print(f"bindCreditLine(): ok  {tx_link(receipt)}")
+def usdc_associated(entity_id: str) -> bool:
+    """Whether an account or contract can hold USDC (it has associated the token)."""
+    body = requests.get(f"{MIRROR}/accounts/{entity_id}/tokens?token.id={required('USDC_TOKEN_ID')}", timeout=20)
+    body.raise_for_status()
+    return bool(body.json().get("tokens"))
 
+
+def deploy_splitter(name: str) -> None:
+    w3, account = web3(), operator()
+    owner = payout_address("OWNER_ACCOUNT_ID", evm_address_of(optional("HEDERA_OWNER_ID")) if optional("HEDERA_OWNER_ID") else account.address)
+    splitter, contract_id = deploy_splitter_contract(w3, account, owner)
+    prepare_splitter(w3, account, splitter, contract_id)
     if name == "main":
         write_deployments({"splitterContractId": contract_id, "splitterEvmAddress": splitter.address})
     else:

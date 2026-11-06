@@ -16,25 +16,22 @@ bureau records the default on Arkiv.
 
     python -m overdraft.watcher [--interval 60] [--once]
 
-Agents' paid endpoints come from WATCH_ENDPOINTS ("agentId=url,agentId=url"). An endpoint can show the
-watcher a different payTo than its customers, so this check detects careless or lasting redirects;
-it can't prove every payment reached the splitter.
+Agents' paid endpoints come from their enrolment applications on Arkiv; WATCH_ENDPOINTS
+("agentId=url,agentId=url") adds or overrides them, for agents set up from the command line. An endpoint
+can show the watcher a different payTo than its customers, so this check detects careless or lasting
+redirects; it can't prove every payment reached the splitter.
 """
 
 import argparse
-import base64
 import json
 import time
 
-import requests
 from web3 import Web3
 
-from . import zg
-from .bureau import decode, new_logs
+from . import applications, endpoint, registry, zg
 from .cli import deployed, format_usdc, tx_link
-from .config import ROOT, optional, read_deployments
+from .config import ROOT, optional
 from .hedera import contract_id_of, operator, send, web3
-from .solidity import load_abi
 
 STATE_PATH = ROOT / "python" / ".state" / "watcher.json"
 MISMATCHES_TO_BREACH = 2
@@ -55,29 +52,14 @@ def save_state(state: dict) -> None:
 
 
 def endpoints() -> dict[int, str]:
+    """Each agent's paid endpoint: from its enrolment application, or WATCH_ENDPOINTS."""
+    try:
+        urls = {agent_id: found["record"]["endpoint"] for agent_id, found in applications.latest().items()}
+    except Exception as error:  # Arkiv busy: keep watching the configured ones
+        print(f"{time.strftime('%H:%M:%S')} applications unavailable ({str(error)[:80]})", flush=True)
+        urls = {}
     pairs = [p.split("=", 1) for p in (optional("WATCH_ENDPOINTS") or "").split(",") if "=" in p]
-    return {int(agent_id): url.strip() for agent_id, url in pairs}
-
-
-def agent_ids() -> list[int]:
-    """Every agent the underwriter has given a line, from the CreditLine's LimitSet events."""
-    contract = Web3().eth.contract(abi=load_abi("CreditLine"))
-    ids = set()
-    for log in new_logs(read_deployments()["creditLineContractId"], None):
-        decoded = decode(contract, log)
-        if decoded and decoded[0] == "LimitSet":
-            ids.add(decoded[1]["agentId"])
-    return sorted(ids)
-
-
-def advertised_pay_to(url: str) -> set[str]:
-    """The payTo accounts an x402 endpoint asks customers to pay, from its 402 reply."""
-    response = requests.post(url, json={}, timeout=20)
-    if response.status_code != 402:
-        raise RuntimeError(f"expected 402 Payment Required, got {response.status_code}")
-    header = response.headers.get("PAYMENT-REQUIRED")
-    body = json.loads(base64.b64decode(header)) if header else response.json()
-    return {option["payTo"] for option in body.get("accepts", [])}
+    return {**urls, **{int(agent_id): url.strip() for agent_id, url in pairs}}
 
 
 def credit_transfers(zg_accounts: list[str], state: dict) -> list[dict]:
@@ -113,7 +95,7 @@ def check_once(state: dict) -> None:
     grace = credit_line.functions.graceSeconds().call()
     urls = endpoints()
     owing = {}
-    for agent_id in agent_ids():
+    for agent_id in [line.agent_id for line in registry.lines()]:
         agent, owner, splitter, zg_account, limit, _, due_at, id_locked, status = credit_line.functions.lines(agent_id).call()
         if status != ACTIVE:
             continue
@@ -135,8 +117,8 @@ def check_once(state: dict) -> None:
             continue
         expected = contract_id_of(line["splitter"])
         try:
-            pay_to = advertised_pay_to(url)
-        except Exception as error:  # an unreachable endpoint isn't a breach; it earns nothing either
+            pay_to = endpoint.quote(url)["payTo"]
+        except ValueError as error:  # an unreachable endpoint isn't a breach; it earns nothing either
             print(f"{time.strftime('%H:%M:%S')} agent {agent_id}: endpoint unreachable ({str(error)[:80]})", flush=True)
             continue
         key = str(agent_id)
