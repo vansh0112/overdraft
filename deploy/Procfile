@@ -1,0 +1,7 @@
+api: cd python && .venv/bin/uvicorn overdraft.console:app --host 0.0.0.0 --port $API_PORT --log-level warning
+agent: cd python && .venv/bin/uvicorn overdraft.agent.app:app --host 127.0.0.1 --port 5001 --log-level warning
+gateway: cd gateway && npm run --silent gateway
+sweeper: cd python && .venv/bin/python -m overdraft.sweeper --interval 5
+relay: cd python && .venv/bin/python -m overdraft.relay --interval 10
+bureau: cd python && .venv/bin/python -m overdraft.bureau watch --interval 15
+watcher: cd python && .venv/bin/python -m overdraft.watcher --interval 60
