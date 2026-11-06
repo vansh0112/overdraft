@@ -89,30 +89,51 @@ _cache_lock = threading.Lock()
 
 _refreshing: set[tuple] = set()
 _generation: dict[tuple, int] = {}  # bumped when a value is forgotten, so a refresh already running can't restore it
+_last_good: dict[tuple, object] = {}  # survives forgetting: served when a public node is busy
+_first_fetch: dict[tuple, threading.Lock] = {}  # callers asking for the same new value together share one fetch
 
 
-def cached(fn):
-    """Keeps each result for a few seconds, so a console polling every second doesn't flood the RPC.
+def cached(fn=None, *, seconds: float | None = None):
+    """Keeps each result for a few seconds (`seconds`, else CACHE_SECONDS), so polling doesn't flood the nodes.
 
     After that the last result is still served at once while a fresh one is fetched in the background,
-    so only the very first request for a value waits for the chains.
+    so only the very first request for a value waits for the chains. If a fetch fails because a public
+    node is busy, the last good result is served rather than an error.
     """
+    if fn is None:
+        return lambda f: cached(f, seconds=seconds)
+    max_age = seconds if seconds is not None else CACHE_SECONDS
+
     @wraps(fn)
     def wrapper(*args):
         key = (fn.__name__, *args)
         with _cache_lock:
             hit = _cache.get(key)
-            stale = hit is not None and time.monotonic() - hit[0] >= CACHE_SECONDS
+            stale = hit is not None and time.monotonic() - hit[0] >= max_age
             refresh = stale and key not in _refreshing
             if refresh:
                 _refreshing.add(key)
         if hit is None:
-            generation = _generation.get(key, 0)
-            value = fn(*args)
             with _cache_lock:
-                if _generation.get(key, 0) == generation:
-                    _cache[key] = (time.monotonic(), value)
-            return value
+                lock = _first_fetch.setdefault(key, threading.Lock())
+            with lock:
+                with _cache_lock:
+                    hit = _cache.get(key)
+                if hit is not None:  # fetched by a caller that got here first
+                    return hit[1]
+                generation = _generation.get(key, 0)
+                try:
+                    value = fn(*args)
+                except (requests.RequestException, RuntimeError):
+                    with _cache_lock:
+                        if key in _last_good:
+                            return _last_good[key]
+                    raise
+                with _cache_lock:
+                    _last_good[key] = value
+                    if _generation.get(key, 0) == generation:
+                        _cache[key] = (time.monotonic(), value)
+                return value
         if refresh:
             generation = _generation.get(key, 0)
 
@@ -120,6 +141,7 @@ def cached(fn):
                 try:
                     value = fn(*args)
                     with _cache_lock:
+                        _last_good[key] = value
                         if _generation.get(key, 0) == generation:
                             _cache[key] = (time.monotonic(), value)
                 except Exception:  # keep serving the last good value; the next request retries
@@ -307,7 +329,7 @@ def decode_attrs(entity: dict) -> dict:
     return out
 
 
-@cached
+@cached(seconds=20)  # Arkiv's public node rate-limits; history changes only when the bureau writes
 def bureau_history(agent_id: int) -> list[dict]:
     current = arkiv.block_timing()["current_block"]
     condition = f"arkiv.schema = str('{SCHEMA}') AND $owner = addr({bureau_address()}) AND agentId = u64({agent_id})"
@@ -409,7 +431,7 @@ def activity(agent_id: int) -> list[dict]:
     return sorted(events, key=lambda e: -e["at"])[:80]
 
 
-@cached
+@cached(seconds=60)
 def refusal_records() -> list[dict]:
     """Every refusal on Arkiv: {agentId, decisionHash, facts}."""
     condition = f"arkiv.schema = str('{SCHEMA}') AND $owner = addr({bureau_address()}) AND kind = str('refusal')"
