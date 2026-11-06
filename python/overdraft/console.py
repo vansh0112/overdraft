@@ -323,7 +323,7 @@ def decode_attrs(entity: dict) -> dict:
     out = {}
     for a in entity["attributes"]:
         value = a["value"]
-        if a["name"] in ("agentId", "limit", "amount", "owedAfter", "owed", "drawId", "dueAt") and isinstance(value, str):
+        if a["name"] in ("agentId", "limit", "amount", "owedAfter", "owed", "drawId", "dueAt", "simulated", "zgBlock", "at") and isinstance(value, str):
             value = int(value, 16)
         out[a["name"]] = value
     return out
@@ -340,9 +340,13 @@ def bureau_history(agent_id: int) -> list[dict]:
         for name in ("amount", "limit", "owedAfter", "owed"):
             if name in attrs:
                 record[f"{name}Usd"] = usd(attrs[name])
-        for name in ("drawId", "dueAt", "reason", "zgTx"):
+        for name in ("drawId", "dueAt", "reason", "zgTx", "zgBlock", "at", "vault"):
             if name in attrs:
                 record[name] = attrs[name]
+        if attrs.get("simulated"):  # a loan's dry-run deposit against the live PaymentVault
+            record["simulated"] = True
+            for name in ("amount0G", "balanceBefore0G", "balanceAfter0G"):
+                record[name] = float(attrs[name])
         if "hederaTx" in attrs:
             record["hederaTx"] = hashscan_tx(attrs["hederaTx"])
         if "record" in attrs:
@@ -408,6 +412,16 @@ def activity(agent_id: int) -> list[dict]:
             events.append(event(at, "breach", f"Breach: {a['reason']}", url))
         elif name == "Defaulted":
             events.append(event(at, "default", f"Defaulted owing ${usd(a['owed']):.4f}: ID sent to the treasury", url))
+
+    try:  # loans whose 0G deposit was a dry run, from the bureau on Arkiv
+        history = bureau_history(agent_id)
+    except Exception:
+        history = []
+    for r in history:
+        if r["kind"] == "disbursed" and r.get("simulated") and r.get("at"):
+            events.append(event(r["at"], "deposit", f"Loan #{r['drawId']} dry-run into 0G compute: {r['amount0G']:.4f} 0G",
+                                f"{zg.EXPLORER}/address/{zg.PAYMENT_VAULT}", drawId=r["drawId"], simulated=True, amount0G=r["amount0G"],
+                                balanceBefore0G=r["balanceBefore0G"], balanceAfter0G=r["balanceAfter0G"], zgBlock=r.get("zgBlock")))
 
     splitter_id = summary["splitter"]["id"]
     for name, a, log in contract_events(splitter_id, "IncomeSplitter"):

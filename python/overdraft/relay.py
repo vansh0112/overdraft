@@ -7,7 +7,9 @@
 
 Amounts are converted from USD with the ZG_PRICE_USD snapshot. Every deposit is capped per transfer and
 per day, and a loan is never deposited twice: the CreditLine and the local state are both checked first.
-With COMPUTE_MODE=placeholder the relay only simulates each deposit against the live PaymentVault.
+With COMPUTE_MODE=placeholder each deposit is a dry run against the live PaymentVault on 0G mainnet
+(eth_simulateV1): nothing is sent or spent, and the result (the agent's compute balance before and after,
+at a given 0G block) is published to the credit bureau on Arkiv as a simulated disbursement.
 
     python -m overdraft.relay [--interval 10] [--once] [--skip-existing]
 """
@@ -18,7 +20,9 @@ import time
 
 from web3 import Web3
 
-from . import zg
+from . import arkiv, zg
+from .arkiv import Attr
+from .bureau import LIFETIME_BLOCKS, SCHEMA
 from .cli import deployed, tx_link
 from .config import ROOT, optional, read_deployments
 from .hedera import operator, send, web3 as hedera_web3
@@ -53,8 +57,9 @@ def within_caps(state: dict, amount_wei: int) -> str | None:
     return None
 
 
-def deposit(state: dict, to: str, amount_usd: float, label: str) -> str | None:
-    """Deposits (or, in placeholder mode, simulates) amount_usd of 0G into `to`. Returns the 0G tx hash if real."""
+def deposit(state: dict, to: str, amount_usd: float, label: str) -> str | dict | None:
+    """Deposits amount_usd of 0G into `to` and returns the 0G tx hash. In placeholder mode it returns the dry
+    run instead: {"amount0G", "before0G", "after0G", "block"}. None if refused or the dry run failed."""
     amount_wei = zg.usd_to_wei(amount_usd)
     refusal = within_caps(state, amount_wei)
     if refusal:
@@ -65,7 +70,9 @@ def deposit(state: dict, to: str, amount_usd: float, label: str) -> str | None:
         sim = zg.simulate_deposit(to, amount_wei)
         print(f"{time.strftime('%H:%M:%S')} {label}: [simulation] depositFor({to}) {amount_0g:.6f} 0G "
               f"(${amount_usd:.4f} at ${zg.price_usd()}/0G) -> {'ok' if sim['ok'] else 'FAILED'}", flush=True)
-        return None
+        if not sim["ok"]:
+            return None
+        return {"amount0G": amount_0g, "before0G": sim["before_wei"] / zg.WEI, "after0G": sim["after_wei"] / zg.WEI, "block": sim["block"]}
     tx_hash = zg.deposit_for(to, amount_wei)
     today = time.strftime("%Y-%m-%d")
     state["spent"][today] = int(state["spent"].get(today, 0)) + amount_wei
@@ -94,10 +101,16 @@ def handle_draw(state: dict, credit_line, credit_line_id: str, args) -> None:
             record["refused"] = "line defaulted"
             print(f"{time.strftime('%H:%M:%S')} loan #{draw_id}: not deposited, agent {args['agentId']}'s line has defaulted", flush=True)
             return
-        tx_hash = deposit(state, args["zgAccount"], args["amount"] / 1_000_000, f"loan #{draw_id}")
-        if not tx_hash:
+        result = deposit(state, args["zgAccount"], args["amount"] / 1_000_000, f"loan #{draw_id}")
+        if isinstance(result, dict):  # a dry run: there is no 0G transaction to record on Hedera
+            record["simulated"] = {**result, "agentId": args["agentId"], "drawId": args["drawId"], "creditLine": credit_line_id,
+                                   "zgAccount": args["zgAccount"], "at": int(time.time())}
+            save_state(state)
+            publish_simulation(record)
             return
-        record["zgTx"] = tx_hash
+        if not result:
+            return
+        record["zgTx"] = result
         save_state(state)  # persist before recording on Hedera, so a retry never deposits twice
     w3, relayer = hedera_web3(), operator()
     tx = credit_line.functions.markDisbursed(args["drawId"], Web3.to_bytes(hexstr=record["zgTx"])).build_transaction(
@@ -107,14 +120,45 @@ def handle_draw(state: dict, credit_line, credit_line_id: str, args) -> None:
     record["marked"] = True
 
 
+def publish_simulation(record: dict) -> None:
+    """Writes a loan's dry-run deposit to the credit bureau on Arkiv, once. Retried on later rounds if Arkiv is busy."""
+    sim = record["simulated"]
+    if record.get("published"):
+        return
+    attrs = [
+        Attr("arkiv.schema", "str", SCHEMA),
+        Attr("kind", "str", "disbursed"),
+        Attr("agentId", "u64", sim["agentId"]),
+        Attr("drawId", "u64", sim["drawId"]),
+        Attr("simulated", "u64", 1),
+        Attr("amount0G", "str", f"{sim['amount0G']:.6f}", indexed=False),
+        Attr("balanceBefore0G", "str", f"{sim['before0G']:.6f}", indexed=False),
+        Attr("balanceAfter0G", "str", f"{sim['after0G']:.6f}", indexed=False),
+        Attr("zgAccount", "addr", sim["zgAccount"], indexed=False),
+        Attr("vault", "addr", zg.PAYMENT_VAULT, indexed=False),
+        Attr("creditLine", "str", sim["creditLine"], indexed=False),
+        Attr("at", "u64", sim["at"], indexed=False),
+    ]
+    if sim.get("block"):
+        attrs.append(Attr("zgBlock", "u64", sim["block"], indexed=False))
+    try:
+        result = arkiv.create_entity(attrs, LIFETIME_BLOCKS["disbursed"])
+    except Exception as error:  # Arkiv busy: the next round tries again
+        print(f"{time.strftime('%H:%M:%S')} loan #{sim['drawId']}: dry run not on Arkiv yet ({str(error)[:80]})", flush=True)
+        return
+    record["published"] = True
+    print(f"{time.strftime('%H:%M:%S')} loan #{sim['drawId']}: dry run recorded on Arkiv  https://rabdi.explorer.arkiv.network/tx/{result['txHash']}",
+          flush=True)
+
+
 def handle_sweep(state: dict, splitter_address: str, args, log_id: str) -> None:
     if args["toCompute"] == 0 or log_id in state["topups"]:
         return
     line = state["lines"].get(splitter_address)
     if not line:
         return
-    tx_hash = deposit(state, line["zgAccount"], args["toCompute"] / 1_000_000, f"compute top-up from income ({log_id[:12]}…)")
-    state["topups"][log_id] = tx_hash or ("simulated" if not LIVE else None)
+    result = deposit(state, line["zgAccount"], args["toCompute"] / 1_000_000, f"compute top-up from income ({log_id[:12]}…)")
+    state["topups"][log_id] = "simulated" if isinstance(result, dict) else result
 
 
 def sync_once(state: dict, skip_existing: bool) -> None:
@@ -140,6 +184,10 @@ def sync_once(state: dict, skip_existing: bool) -> None:
                 elif name == "Swept" and not (first_run and skip_existing):
                     handle_sweep(state, log["address"].lower(), args, log_id)
             state["cursors"][contract_id] = {"timestamp": log["timestamp"], "index": log["index"]}
+            save_state(state)
+    for record in state["draws"].values():  # dry runs Arkiv didn't take on an earlier round
+        if record.get("simulated") and not record.get("published"):
+            publish_simulation(record)
             save_state(state)
 
 

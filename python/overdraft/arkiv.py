@@ -115,16 +115,20 @@ def create_entities(items: list[tuple[list[Attr], int]]) -> dict:
     w3, account = web3(), bureau()
     contract = w3.eth.contract(address=ARKIV_ADDRESS, abi=EXECUTE_ABI)
     tx = contract.functions.execute(ops).build_transaction({"from": account.address, "value": 0})
-    tx = {k: v for k, v in tx.items() if k not in ("maxFeePerGas", "maxPriorityFeePerGas", "type")}
-    tx.update(
-        {
-            "nonce": w3.eth.get_transaction_count(account.address),
-            "gasPrice": w3.eth.gas_price,
-            "chainId": w3.eth.chain_id,
-        }
-    )
-    signed = account.sign_transaction(tx)
-    tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+    tx = {k: v for k, v in tx.items() if k not in ("maxFeePerGas", "maxPriorityFeePerGas", "type", "nonce")}
+    tx.update({"gasPrice": w3.eth.gas_price, "chainId": w3.eth.chain_id})
+    # Several services write as the bureau wallet (the bureau writer, the relay, the console API). If another
+    # one takes the nonce first, sign again with the next one.
+    for attempt in range(4):
+        signed = account.sign_transaction({**tx, "nonce": w3.eth.get_transaction_count(account.address, "pending")})
+        try:
+            tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+            break
+        except ValueError as error:
+            message = str(error).lower()
+            if attempt == 3 or not any(word in message for word in ("nonce", "replacement", "already known")):
+                raise
+            time.sleep(1 + attempt)
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
     if receipt["status"] != 1:
         raise RuntimeError(f"Arkiv batch reverted: {tx_hash.to_0x_hex()}")

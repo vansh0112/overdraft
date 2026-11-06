@@ -77,11 +77,13 @@ def simulate_deposit(to: str, amount_wei: int) -> dict:
     }).json()
     if "error" in body:
         raise RuntimeError(f"eth_simulateV1: {body['error']}")
-    before, dep, after = body["result"][0]["calls"]
+    block = body["result"][0]
+    before, dep, after = block["calls"]
     return {
         "ok": dep["status"] == "0x1" and int(after["returnData"], 16) - int(before["returnData"], 16) == amount_wei,
         "before_wei": int(before["returnData"], 16),
         "after_wei": int(after["returnData"], 16),
+        "block": int(block["number"], 16) if block.get("number") else None,
     }
 
 
