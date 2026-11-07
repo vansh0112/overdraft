@@ -11,6 +11,8 @@ AI agents pay for their AI before every job, but their customers pay after. So a
 
 | | |
 |---|---|
+| **Demo video** | https://youtu.be/swHQts-RGK8 |
+| **Hedera video** (x402 on Hedera) | https://youtu.be/AKzrK-sOtQA |
 | **Live app** | https://overdraft-nine.vercel.app |
 | **Live demo agent** | https://overdraft-nine.vercel.app/agents/140 |
 | **Test x402 endpoint** (for enrolling your own agent) | `https://backend-production-6d63.up.railway.app/sandbox/<agent ID>/translate` |

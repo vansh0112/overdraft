@@ -478,9 +478,16 @@ def refusals() -> list[dict]:
 
 
 @cached
+def _agent_status() -> dict:
+    response = requests.get(f"{required('AGENT_INTERNAL_URL')}/status", timeout=10)
+    response.raise_for_status()
+    return response.json()
+
+
 def agent_status() -> dict | None:
+    """The demo agent's own status: the last good one while it briefly can't answer, None if it never has."""
     try:
-        return requests.get(f"{required('AGENT_INTERNAL_URL')}/status", timeout=10).json()
+        return _agent_status()
     except Exception:
         return None
 

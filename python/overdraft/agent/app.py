@@ -128,6 +128,21 @@ async def translate(request: TranslateRequest) -> dict:
         state["waiting"] -= 1
 
 
+_credit = {"owedUsd": None, "availableUsd": None}
+
+
+async def credit() -> dict:
+    """What the agent owes and can still borrow, read from the CreditLine. When a public Hedera node briefly
+    fails, the last values read are kept, so the status still answers."""
+    try:
+        owed = await asyncio.to_thread(borrower.owed_usd)
+        available = await asyncio.to_thread(borrower.available_usd)
+        _credit.update(owedUsd=owed, availableUsd=available)
+    except Exception as error:
+        print(f"credit read skipped: {str(error)[:120]}", flush=True)
+    return dict(_credit)
+
+
 @app.get("/status")
 async def status() -> dict:
     balance = await asyncio.to_thread(compute.balance_usd)
@@ -139,8 +154,7 @@ async def status() -> dict:
         "coversJobs": int(spendable(balance) / state["costPerJobUsd"] + 1e-9),
         "tier": tier(balance),
         **{k: (round(v, 6) if isinstance(v, float) else v) for k, v in state.items()},
-        "owedUsd": await asyncio.to_thread(borrower.owed_usd),
-        "availableUsd": await asyncio.to_thread(borrower.available_usd),
+        **await credit(),
         "events": list(events)[:50],
     }
 
